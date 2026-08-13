@@ -1,0 +1,48 @@
+# Approved fact store for resume tailoring.
+# Copy to profile/accomplishments.yaml and edit.
+#
+# RULE: every generated resume bullet must trace to a fact id below.
+# Tailoring may reorder, shorten, and re-emphasize. It may never invent.
+
+version: 1
+
+experiences:
+  - id: example-company
+    company: Example Company
+    role: Senior Software Engineer / Technical Lead
+    start: 2019-01
+    end: 2024-06
+    facts:
+      - id: rewards-event-services
+        statement: Designed event-driven microservices supporting a large-scale rewards platform.
+        tags:
+          - loyalty
+          - rewards
+          - events
+          - microservices
+
+      - id: retail-scale
+        statement: Worked on retail and rewards platforms supporting millions of daily transactions.
+        tags:
+          - retail
+          - scale
+
+      - id: mentorship
+        statement: Mentored engineers and led technical design reviews for a team of eight.
+        tags:
+          - leadership
+          - mentoring
+
+skills:
+  - id: typescript
+    name: TypeScript
+    level: expert
+  - id: distributed-systems
+    name: Distributed systems
+    level: expert
+
+education:
+  - id: bs-cs
+    institution: Example University
+    credential: B.S. Computer Science
+    year: 2012

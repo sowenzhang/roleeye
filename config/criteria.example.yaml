@@ -1,0 +1,58 @@
+version: 1
+profile_name: default
+
+decision_thresholds:
+  apply: 78
+  maybe: 62
+
+# Must total 100.
+weights:
+  career_direction: 20
+  hands_on: 15
+  product_customer: 15
+  ai_relevance: 15
+  technical_domain: 15
+  location: 10
+  compensation: 10
+
+# Evaluated deterministically before any LLM call.
+hard_filters:
+  countries:
+    - US
+  require_us_payroll: true
+  relocation:
+    reject_if_required: true
+  minimum_base_salary:
+    amount: 200000
+    currency: USD
+
+# Applied to the score after the Judge returns.
+penalties:
+  application_system:
+    workday: -100
+  primarily_people_management: -25
+  infrastructure_primary: -20
+
+preferences:
+  work_arrangement:
+    preferred:
+      - remote
+      - seattle-hybrid
+
+  application_system:
+    deny:
+      - workday
+
+  direction:
+    positive:
+      - hands-on IC
+      - technical lead
+      - product architecture
+      - AI engineering
+      - agentic workflows
+      - direct customer contact
+    negative:
+      - organization management
+      - large people-management scope
+      - pure infrastructure
+      - pure platform operations

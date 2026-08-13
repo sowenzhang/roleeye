@@ -1,0 +1,40 @@
+{
+  "jobs": [
+    {
+      "id": 4012345,
+      "internal_job_id": 3001,
+      "title": "Principal Software Engineer, Loyalty Platform",
+      "updated_at": "2026-08-10T18:04:12-04:00",
+      "first_published": "2026-08-01T09:00:00-04:00",
+      "requisition_id": "REQ-1042",
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/4012345?gh_src=abc123&utm_source=linkedin",
+      "location": { "name": "Seattle, WA (Hybrid)" },
+      "offices": [{ "name": "Seattle" }],
+      "departments": [{ "name": "Engineering" }],
+      "metadata": [{ "name": "Employment Type", "value": "Full-time" }],
+      "content": "&lt;p&gt;We are hiring a &lt;strong&gt;Principal Software Engineer&lt;/strong&gt; for our loyalty and rewards platform.&lt;/p&gt;&lt;h3&gt;What you will do&lt;/h3&gt;&lt;ul&gt;&lt;li&gt;Design event-driven services handling millions of daily transactions&lt;/li&gt;&lt;li&gt;Partner directly with product and customers&lt;/li&gt;&lt;li&gt;Ship agentic AI features into the rewards experience&lt;/li&gt;&lt;/ul&gt;&lt;h3&gt;Compensation&lt;/h3&gt;&lt;p&gt;The base salary range for this role is $220,000 - $265,000 per year.&lt;/p&gt;"
+    },
+    {
+      "id": 4012346,
+      "internal_job_id": 3002,
+      "title": "Senior Engineering Manager, Payments",
+      "updated_at": "2026-08-11T11:22:00-04:00",
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/4012346",
+      "location": { "name": "Remote - United States" },
+      "offices": [{ "name": "Remote" }],
+      "departments": [{ "name": "Engineering" }],
+      "content": "&lt;p&gt;Lead a team of eight engineers building payment infrastructure.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Own hiring and performance management&lt;/li&gt;&lt;li&gt;Drive platform reliability&lt;/li&gt;&lt;/ul&gt;"
+    },
+    {
+      "id": 4012347,
+      "internal_job_id": 3003,
+      "title": "Engineering Intern, Summer 2027",
+      "updated_at": "2026-08-11T11:25:00-04:00",
+      "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/4012347",
+      "location": { "name": "Berlin, Germany" },
+      "offices": [{ "name": "Berlin" }],
+      "content": "&lt;p&gt;Summer internship on the platform team.&lt;/p&gt;"
+    }
+  ],
+  "meta": { "total": 3 }
+}

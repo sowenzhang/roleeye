@@ -1,0 +1,39 @@
+{
+  "name": "roleeye",
+  "version": "0.1.0",
+  "description": "Local-first AI career agent that keeps an eye on the job market, with the human in the loop.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "roleeye": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck": "tsc -p tsconfig.tests.json",
+    "dev": "tsx src/index.ts",
+    "roleeye": "tsx src/index.ts",
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "test:unit": "tsx --test \"tests/unit/**/*.test.ts\"",
+    "test:integration": "tsx --test \"tests/integration/**/*.test.ts\""
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "yaml": "^2.7.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

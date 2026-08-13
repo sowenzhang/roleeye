@@ -1,0 +1,48 @@
+version: 1
+
+defaults:
+  request_delay_ms: 1500
+  timeout_ms: 20000
+  max_pages: 5
+  user_agent: "roleeye/0.1 (+local career agent)"
+
+sources:
+  - name: example-greenhouse
+    type: greenhouse
+    enabled: true
+    # Greenhouse board token, e.g. https://boards.greenhouse.io/<board>
+    board: example-board
+    company: Example Company
+
+  - name: example-lever
+    type: lever
+    enabled: false
+    # Lever site slug, e.g. https://jobs.lever.co/<site>
+    site: example-site
+    company: Example Company
+
+  - name: example-ashby
+    type: ashby
+    enabled: false
+    # Ashby board name, e.g. https://jobs.ashbyhq.com/<board>
+    board: example-board
+    company: Example Company
+
+  - name: example-career-page
+    type: career-page
+    enabled: false
+    company: Example Company
+    url: https://example.com/careers
+    # Use the browser fallback only when no structured feed exists.
+    browser_fallback: false
+
+# Optional filters applied at discovery time to limit fetch volume.
+discovery_filters:
+  title_include:
+    - engineer
+    - architect
+    - principal
+    - staff
+  title_exclude:
+    - intern
+    - sales

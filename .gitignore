@@ -1,0 +1,39 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# local database (source of truth - back up deliberately, do not commit)
+data/*
+!data/.gitkeep
+
+# generated application artifacts (private)
+artifacts/*
+!artifacts/.gitkeep
+
+# export packages
+export/*
+!export/.gitkeep
+
+# real user config / profile (only *.example.* are committed)
+config/*
+!config/*.example.yaml
+!config/.gitkeep
+profile/*
+!profile/*.example.md
+!profile/*.example.yaml
+!profile/.gitkeep
+
+# logs & temp
+logs/
+*.log
+.cache/
+coverage/
+.DS_Store

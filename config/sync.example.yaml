@@ -1,0 +1,46 @@
+version: 1
+
+# The local database is always authoritative. The VPS is a read replica.
+enabled: false
+
+target:
+  host: vps.example.com
+  user: roleeye
+  # Path on the VPS where export packages are dropped for import.
+  import_dir: /srv/roleeye/incoming
+  # Prefer SSH key auth; never store secrets in this file.
+  ssh_key_env: ROLEEYE_SYNC_SSH_KEY
+  known_hosts_check: true
+
+export:
+  # private | public
+  default_mode: private
+  output_dir: ./export
+  include_artifacts: false
+  checksum_algorithm: sha256
+
+# Public export is allow-list only. Anything not listed is never published.
+public_allow_list:
+  jobs:
+    - company
+    - title
+    - location_text
+    - work_arrangement
+    - salary_min
+    - salary_max
+    - salary_currency
+    - source_type
+    - source_url
+    - first_seen_at
+    - last_seen_at
+    - summary
+    - tags
+  evaluations:
+    - decision
+    - score
+    - headline
+  applications: []
+
+schedule:
+  # Guidance for the OS scheduler; RoleEye itself does not run a daemon.
+  weekly: "roleeye export --private && roleeye sync"
