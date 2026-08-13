@@ -67,16 +67,36 @@ where the state they display will exist.
 - The portal opens even when a config file on disk is broken, which is exactly
   when someone needs it.
 - Board lookup checks a pasted careers URL against the live adapter through the
-  URL guard, so nobody has to know what an ATS board token is. Adding Airtable
-  reported "19 open roles right now".
+  URL guard, so nobody has to know what an ATS board token is.
 - No bundler and no framework: `node:http` plus one embedded page module, so
   `tsc` remains the only build step and the whole UI is auditable in one file.
-- All third-party text is inserted as text nodes; `innerHTML` is never used on
-  it, and a test asserts that.
+- All third-party text is inserted as text nodes; `innerHTML` is never assigned
+  anywhere on the page, and a test asserts that.
 
-Verified end to end from a clean install: portal wrote both files → `doctor`
-passed → `scan` fetched 19 roles and stored 1 in scope → `screen` marked it
-eligible → reopening the portal showed the persisted settings and live counts.
+### Configuration by picking, not typing
+
+The first version still asked for comma-separated lists in six text boxes, which
+means asking the user to guess our matching rules. Replaced with:
+
+- **51 preloaded company boards**, every token verified live against its
+  provider before shipping. 16 of the first 50 guesses were wrong, which is
+  exactly why an unverified catalog would have shipped broken. Re-check any time
+  with `npm run catalog:check`.
+- **Role families** — "Software engineering" expands into the title terms and
+  the lookalike exclusions ("sales engineer" is not a software engineer).
+- **Seniority, locations, metros, salary, recency, and refused application
+  systems** as chips and scales.
+- Free text survives only in an Advanced panel, so nothing is lost — only typing.
+
+Seniority compiles to level *exclusions* rather than inclusions: an inclusion
+list silently drops every posting whose title states no level, which is a large
+share of real postings.
+
+Verified end to end in a browser from a clean install: five companies picked by
+clicking, no typing at all → `doctor` passed → `scan` fetched 1,715 postings and
+stored the 123 in scope → `screen` marked 113 eligible → reopening the portal
+showed every selection restored. Mobile collapses to a single column at 390px
+with no horizontal scroll.
 
 ## Phase 3a notes
 

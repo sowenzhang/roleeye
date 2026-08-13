@@ -178,14 +178,30 @@ describe('portal security', () => {
 });
 
 describe('portal page', () => {
-  it('renders without a bundler and escapes third-party text at runtime', () => {
+  it('renders without a bundler and never assigns innerHTML', () => {
     const html = renderIndex();
 
     assert.match(html, /<title>RoleEye<\/title>/);
-    assert.match(html, /id="boardEntry"/);
-    // Job titles and company names are inserted as text nodes, never as markup.
-    assert.match(html, /textContent = String/);
-    assert.ok(!/innerHTML\s*=/.test(html), 'innerHTML must not be used on third-party text');
+    assert.match(html, /id="catalog"/);
+    // Company names and job titles are third-party text: nodes only, never markup.
+    assert.match(html, /textContent = /);
+    assert.ok(!/\.innerHTML\s*=/.test(html), 'innerHTML must never be assigned on this page');
+  });
+
+  it('offers pickers rather than free-text boxes for the main settings', () => {
+    const html = renderIndex();
+
+    for (const id of ['families', 'seniority', 'locations', 'salary', 'recency', 'systems']) {
+      assert.match(html, new RegExp(`id="${id}"`), `${id} must be a picker`);
+    }
+
+    // Free text survives only in the advanced panel.
+    const textInputs = [...html.matchAll(/<input type="text"[^>]*id="([^"]+)"/g)].map((match) => match[1]);
+    assert.deepEqual(textInputs.sort(), ['boardEntry', 'extraExcludes', 'extraTitles', 'search'].sort());
+  });
+
+  it('contains no emoji', () => {
+    assert.ok(!/\p{Extended_Pictographic}/u.test(renderIndex()));
   });
 });
 

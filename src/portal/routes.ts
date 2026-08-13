@@ -7,6 +7,17 @@ import { postingsUrl } from '../discovery/lever.js';
 import { jobBoardUrl } from '../discovery/ashby.js';
 import { createHttpClient } from '../discovery/http.js';
 import { parseBoardEntry } from '../cli/setup.js';
+import { CATALOG, CATEGORY_LABELS, catalogEntryToSource } from './catalog.js';
+import {
+  APPLICATION_SYSTEMS,
+  compileSelection,
+  inferSelection,
+  LOCATION_OPTIONS,
+  METRO_OPTIONS,
+  ROLE_FAMILIES,
+  SALARY_STEPS,
+  SENIORITY_OPTIONS,
+} from './presets.js';
 import type { Logger } from '../util/logger.js';
 import type { ConfigService } from './config-service.js';
 import type { RouteHandler, RouteResult } from './server.js';
@@ -94,9 +105,74 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
       return ok({
         criteria: criteria.value,
         sources: sources.value,
+        selection: inferSelection(
+          (sources.value.discovery?.scope ?? {}) as Record<string, unknown>,
+          criteria.value as unknown as Record<string, unknown>,
+        ),
+        captureMode: sources.value.discovery?.capture_mode ?? 'scoped',
         exists: { criteria: criteria.exists, sources: sources.exists },
         locations: deps.config.locations(),
       });
+    },
+
+    'GET /api/catalog': () => {
+      const sources = deps.config.readSources();
+      const existing = new Set(
+        sources.value.sources.map((source: SourceConfig) => {
+          const token = 'board' in source ? source.board : 'site' in source ? source.site : '';
+          return `${source.type}:${token}`.toLowerCase();
+        }),
+      );
+
+      return ok({
+        categories: CATEGORY_LABELS,
+        entries: CATALOG.map((entry) => ({
+          ...entry,
+          added: existing.has(`${entry.type}:${entry.token}`.toLowerCase()),
+        })),
+      });
+    },
+
+    'GET /api/presets': () =>
+      ok({
+        families: ROLE_FAMILIES,
+        seniority: SENIORITY_OPTIONS,
+        locations: LOCATION_OPTIONS,
+        metros: METRO_OPTIONS,
+        salarySteps: SALARY_STEPS,
+        applicationSystems: APPLICATION_SYSTEMS,
+      }),
+
+    /** Saves picked options by compiling them into scope and criteria. */
+    'PUT /api/preferences': ({ body }) => {
+      const selection = body as Parameters<typeof compileSelection>[0];
+      const compiled = compileSelection(selection);
+
+      const sources = deps.config.readSources().value as Record<string, any>;
+      const criteria = deps.config.readCriteria().value as Record<string, any>;
+
+      sources['discovery'] = {
+        capture_mode: selection.captureMode ?? 'scoped',
+        scope: compiled.scope,
+      };
+      if (Array.isArray(selection.catalog)) {
+        const chosen = CATALOG.filter((entry) =>
+          (selection.catalog as string[]).includes(`${entry.type}:${entry.token}`),
+        );
+        sources['sources'] = chosen.map(catalogEntryToSource);
+      }
+
+      criteria['hard_filters'] = { ...criteria['hard_filters'], ...compiled.hardFilters };
+      criteria['preferences'] = { ...criteria['preferences'], ...compiled.preferences };
+      criteria['screening'] = { ...criteria['screening'], enabled: selection.screeningEnabled !== false };
+
+      const savedSources = deps.config.saveSources(sources);
+      if (!savedSources.ok) return badRequest({ saved: false, problems: savedSources.problems });
+
+      const savedCriteria = deps.config.saveCriteria(criteria);
+      if (!savedCriteria.ok) return badRequest({ saved: false, problems: savedCriteria.problems });
+
+      return ok({ saved: true, sources: savedSources.path, criteria: savedCriteria.path });
     },
 
     'PUT /api/config/criteria': ({ body }) => {

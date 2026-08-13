@@ -76,20 +76,23 @@ Requires Node.js 22+.
 npm install
 npm run build
 
-node dist/index.js ui                     # configure in a browser, no YAML required
+node dist/index.js ui                     # pick companies and preferences, no typing
 node dist/index.js scan                   # real jobs from real boards
 node dist/index.js screen                 # filters + scam screening
 node dist/index.js verify <job-id>        # why it passed or failed
 node dist/index.js schedule install --at 07:30
 ```
 
+The portal ships with **51 company boards**, each verified live against its
+provider. Pick companies, role families, seniority, locations, a salary floor,
+and which application systems you refuse — all by clicking. Free text is
+confined to an Advanced panel for people who want it.
+
 Prefer a terminal? `node dist/index.js init --interactive` asks the same
 questions. Both write the same YAML, validated the same way.
 
 Everything above is deterministic. No model is called, nothing is sent anywhere,
 and nothing is spent.
-
-`roleeye init` without `--interactive` copies the committed example files instead.
 
 During development, run the CLI straight from TypeScript:
 
