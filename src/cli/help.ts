@@ -1,11 +1,15 @@
 import { ExitCode } from '../util/errors.js';
 import { addCommand } from './add.js';
+import { backupCommand } from './backup.js';
 import { doctorCommand } from './doctor.js';
 import { initCommand } from './init.js';
 import { listCommand } from './list.js';
 import { scanCommand } from './scan.js';
+import { scheduleCommand } from './schedule.js';
 import { scopeCommand } from './scope.js';
+import { screenCommand } from './screen.js';
 import { showCommand } from './show.js';
+import { verifyCommand } from './verify.js';
 import { printLine, type Command, type CommandContext } from './command.js';
 
 export const commands: readonly Command[] = [
@@ -14,8 +18,12 @@ export const commands: readonly Command[] = [
   scanCommand,
   addCommand,
   scopeCommand,
+  screenCommand,
+  verifyCommand,
   listCommand,
   showCommand,
+  scheduleCommand,
+  backupCommand,
 ];
 
 export function findCommand(name: string | undefined): Command | undefined {
@@ -25,16 +33,15 @@ export function findCommand(name: string | undefined): Command | undefined {
 
 /** Commands documented in agent.md that later phases will implement. */
 const PLANNED: ReadonlyArray<readonly [string, string]> = [
-  ['evaluate', 'phase 3'],
-  ['recommend', 'phase 3'],
+  ['evaluate', 'phase 3b'],
+  ['recommend', 'phase 3b'],
   ['resume', 'phase 4'],
   ['apply-record', 'phase 5'],
   ['status', 'phase 5'],
   ['note', 'phase 5'],
   ['stats', 'phase 6'],
   ['ask', 'phase 7'],
-  ['export', 'phase 8'],
-  ['sync', 'phase 8'],
+  ['ui', 'phase 6.5'],
 ];
 
 export function isPlannedCommand(name: string): boolean {

@@ -263,14 +263,18 @@ Not every posting represents a real, currently open job. Before spending
 reasoning effort — or the user's time — on a role, the system estimates whether
 the posting is genuine.
 
-Four verdicts:
+Four independent dimensions, because a posting can be several of these at once
+and a single label would hide that:
 
-| Verdict | Meaning |
-|---|---|
-| `genuine` | No meaningful doubt about the posting |
-| `stale` | Probably a real role, but open unusually long or repeatedly reposted |
-| `ghost` | Probably not an actively hired role: evergreen pipeline, backfill placeholder, or agency listing |
-| `fraudulent` | Probably a scam or an impersonation of a real company |
+| Dimension | Values | Answers |
+|---|---|---|
+| `freshness` | current, stale, unknown | Has this been open an unusually long time? |
+| `hiringIntent` | specific, evergreen, unknown | Is this a real opening or a permanent pipeline ad? |
+| `fraudRisk` | low, medium, high | Is someone trying to scam the applicant? |
+| `provenance` | verified, unverified, suspicious | Do we know who is really hiring? |
+
+`unknown` is a first-class answer. A dimension that lacks the data to judge says
+so instead of guessing.
 
 ## Deterministic signals first
 
@@ -312,12 +316,15 @@ description — never the full corpus.
 ## Rules
 
 - A verdict is never silently applied. The user always sees which signals fired.
-- `ghost` and `stale` reduce priority; they do not delete or hide the posting.
-- `fraudulent` stops the pipeline: no evaluation, no resume, no application
+- Longitudinal signals require history. Until a posting has been observed for the
+  configured window, freshness and hiring intent report `unknown` rather than
+  inventing confidence from a single sighting.
+- `stale` and `evergreen` reduce priority; they do not delete or hide anything.
+- High fraud risk stops the pipeline: no evaluation, no resume, no application
   artifacts. The user is notified with the specific evidence.
 - The system never contacts a suspected fraudulent poster to "verify" anything.
-- Signals are recorded per job and per evaluation so accuracy can be reviewed
-  later against real outcomes.
+- Signals are recorded per job so screening accuracy can be reviewed later
+  against real outcomes.
 - Thresholds live in `config/criteria.yaml`. A user who wants to see everything
   can turn screening off.
 
@@ -871,18 +878,20 @@ roleeye sync
 roleeye doctor
 ```
 
-Added by the scope, authenticity, cost, and portal decisions:
+Added by the scope, authenticity, cost, and local-agent decisions:
 
 ```bash
 roleeye add <url>                  # capture a posting the adapters cannot reach
 roleeye scope test                 # preview what the scope filter keeps and drops
-roleeye verify <job-id>            # authenticity signals and verdict for one job
+roleeye screen                     # deterministic filters + authenticity over stored roles
+roleeye verify <job-id>            # explain one role, signal by signal
+roleeye backup                     # snapshot the authoritative database
+roleeye schedule install|status|remove   # register the daily run with the OS scheduler
 roleeye profile import <file>      # import an existing .docx / .pdf resume as draft facts
-roleeye facts approve <fact-id>    # promote a draft fact into the approved store
+roleeye facts approve <id>         # promote draft facts into the approved store
 roleeye stats --cost               # model spend by day, stage, and model
 roleeye budget                     # show and set spend limits
 roleeye ui                         # local portal on 127.0.0.1
-roleeye schedule install|remove    # register the daily job with the OS scheduler
 ```
 
 Commands should be scriptable and have non-interactive modes.

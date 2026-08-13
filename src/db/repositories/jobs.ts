@@ -26,6 +26,7 @@ interface JobRow {
   has_body: number;
   fingerprint: string;
   cluster_key: string | null;
+  content_key: string | null;
   in_scope: number;
   scope_reason: string | null;
   posted_at: string | null;
@@ -59,6 +60,7 @@ export interface JobRecord {
   hasBody: boolean;
   fingerprint: string;
   clusterKey: string | undefined;
+  contentKey: string | undefined;
   inScope: boolean;
   scopeReason: string | undefined;
   postedAt: IsoTimestamp | undefined;
@@ -92,6 +94,7 @@ function mapRow(row: JobRow & { company_name?: string }): JobRecord {
     hasBody: row.has_body !== 0,
     fingerprint: row.fingerprint,
     clusterKey: fromDb(row.cluster_key),
+    contentKey: fromDb(row.content_key),
     inScope: row.in_scope !== 0,
     scopeReason: fromDb(row.scope_reason),
     postedAt: fromDb(row.posted_at),
@@ -164,6 +167,19 @@ export class JobRepository {
     return row ? mapRow(row) : undefined;
   }
 
+  /**
+   * How many distinct companies advertise this exact content.
+   *
+   * Uses the content-only key, because `fingerprint` and `cluster_key` both
+   * include the company and therefore can never match across companies.
+   */
+  countCompaniesSharingContent(contentKey: string): number {
+    const row = this.db
+      .prepare('SELECT COUNT(DISTINCT company_id) AS n FROM jobs WHERE content_key = ?')
+      .get(contentKey) as { n: number };
+    return row.n;
+  }
+
   insert(normalized: NormalizedJob, companyId: string, seenAt: IsoTimestamp, scope: ScopeState): JobRecord {
     const id = deriveJobId(normalized.identityKey);
     const timestamp = nowIso();
@@ -174,13 +190,13 @@ export class JobRepository {
         `INSERT INTO jobs (
            id, company_id, title, normalized_title, level, employment_type, work_arrangement,
            location_text, country, department, team, salary_min, salary_max, salary_currency,
-           salary_period, description_text, description_hash, has_body, fingerprint, cluster_key,
+           salary_period, description_text, description_hash, has_body, fingerprint, cluster_key, content_key,
            in_scope, scope_reason, posted_at, first_seen_at, last_seen_at, closed_at,
            created_at, updated_at
          ) VALUES (
            @id, @company_id, @title, @normalized_title, @level, @employment_type, @work_arrangement,
            @location_text, @country, @department, @team, @salary_min, @salary_max, @salary_currency,
-           @salary_period, @description_text, @description_hash, @has_body, @fingerprint, @cluster_key,
+           @salary_period, @description_text, @description_hash, @has_body, @fingerprint, @cluster_key, @content_key,
            @in_scope, @scope_reason, @posted_at, @first_seen_at, @last_seen_at, NULL,
            @created_at, @updated_at
          )`,
@@ -206,6 +222,7 @@ export class JobRepository {
         has_body: hasBody ? 1 : 0,
         fingerprint: normalized.fingerprint,
         cluster_key: toDb(normalized.clusterKey),
+        content_key: toDb(normalized.contentKey),
         in_scope: scope.inScope ? 1 : 0,
         scope_reason: toDb(scope.scopeReason),
         posted_at: toDb(normalized.postedAt),
@@ -246,6 +263,7 @@ export class JobRepository {
              -- Backfills rows migrated from before clustering existed, so they
              -- can still be recognised when another source lists the same role.
              cluster_key = COALESCE(cluster_key, @cluster_key),
+             content_key = COALESCE(content_key, @content_key),
              updated_at = @updated_at
            WHERE id = @id`,
         )
@@ -255,6 +273,7 @@ export class JobRepository {
           in_scope: options.scope.inScope ? 1 : 0,
           scope_reason: toDb(options.scope.scopeReason),
           cluster_key: toDb(normalized.clusterKey),
+        content_key: toDb(normalized.contentKey),
           updated_at: nowIso(),
         });
       return;
@@ -281,6 +300,7 @@ export class JobRepository {
            has_body = 1,
            fingerprint = @fingerprint,
            cluster_key = COALESCE(@cluster_key, cluster_key),
+           content_key = COALESCE(@content_key, content_key),
            in_scope = @in_scope,
            scope_reason = @scope_reason,
            posted_at = COALESCE(@posted_at, posted_at),
@@ -308,6 +328,7 @@ export class JobRepository {
         description_hash: normalized.descriptionHash,
         fingerprint: normalized.fingerprint,
         cluster_key: toDb(normalized.clusterKey),
+        content_key: toDb(normalized.contentKey),
         in_scope: options.scope.inScope ? 1 : 0,
         scope_reason: toDb(options.scope.scopeReason),
         posted_at: toDb(normalized.postedAt),

@@ -1446,25 +1446,44 @@ Acceptance:
 
 ---
 
-## Phase 3 — Evaluation + Authenticity + Cost Control
+## Phase 3a — Deterministic Screening
+
+No model is called in this phase. Everything here is free, fast, and testable,
+and it is what makes the expensive phase affordable.
 
 Build:
 
-- career profile loader
-- criteria engine
-- hard filters
-- authenticity screening (§37)
-- evaluation cache keyed by content and config version (§38)
+- criteria loader with a content-derived hash for cache keys
+- deterministic hard filters (§14 stage A)
+- deterministic authenticity screening (§37)
+- spend accounting tables and budget configuration, ready for 3b
+- `roleeye screen`, `roleeye verify`
+- `roleeye backup`, taken automatically before every migration
+- `roleeye schedule install|status|remove`
+- interactive `roleeye init`
+
+Acceptance:
+
+- a role failing a hard filter is reported with the specific rule that rejected it
+- missing data never silently rejects or silently admits; the behaviour is
+  configured and reported
+- fraud markers are detected on first sight
+- longitudinal signals refuse to render a verdict until enough history exists
+- a daily scan can be scheduled with one command on Windows and on cron systems
+
+---
+
+## Phase 3b — Evaluation
+
+Build:
+
 - requirement extraction
-- Advocate
-- Skeptic
-- Judge
-- evaluation persistence
-- model spend accounting and budget enforcement
-- `evaluate`
-- `recommend`
-- `verify`
-- `stats --cost`
+- ReasoningProvider boundary
+- fit evaluation with an explicitly skeptical pass
+- evaluation persistence bound to the snapshot judged
+- evaluation cache keyed by content, profile, and criteria hashes
+- per-call spend accounting against the budget
+- `roleeye evaluate`, `roleeye recommend`, `roleeye stats --cost`
 
 Acceptance:
 
@@ -1478,31 +1497,27 @@ returns concise APPLY/MAYBE/SKIP results.
 - a posting failing a deterministic filter never reaches a model
 - every model call is recorded with stage, model, tokens, and estimated cost
 - an exhausted budget stops the run cleanly and reports what remains queued
-- a `fraudulent` verdict blocks evaluation and artifact generation
+- a high fraud risk blocks evaluation and artifact generation
 
 ---
 
-## Phase 3.5 — Local Portal, Notifications, Scheduling
+## Phase 3.5 — Notifications
 
-The CLI proves the workflow; the portal makes it liveable. This phase adds no
-new business logic — it exposes existing modules.
+Scheduling ships in 3a, so the unattended loop only needs a way to reach the user.
 
 Build:
 
 - `Notifier` interface with terminal, desktop, and webhook adapters
 - daily digest generation
-- `roleeye schedule install` for Task Scheduler and cron
-- `roleeye ui`: a localhost-only server over the existing core
-- portal screens: configuration editing, review queue, job history, spend
 
 Acceptance:
 
-- the portal writes the same YAML files the CLI reads, through the same schemas
-- no business logic exists in the web layer
-- the server binds to `127.0.0.1` only and refuses non-local origins
-- posting text renders escaped; a posting containing markup or instructions
-  cannot alter the page or the agent's behavior
+- a scheduled scan can notify without a terminal attached
 - every notification links to the underlying local record
+
+The local portal moved to its own phase after application tracking exists. A
+portal over recommendations alone would surface a list the CLI already prints;
+it becomes worth building once there is application state to manage.
 
 ---
 
@@ -1567,7 +1582,46 @@ Acceptance:
 
 ---
 
+## Phase 6.5 — Local Portal
+
+Deferred until here deliberately. A portal over recommendations alone shows a
+list the CLI already prints; it earns its keep once there is application state,
+history, and analytics to manage.
+
+Build:
+
+- `roleeye ui`: a localhost-only server over the existing core
+- configuration editing through the same schemas the CLI validates
+- review queue, job history, application timeline, spend
+
+Acceptance:
+
+- the portal writes the same YAML files the CLI reads, through the same schemas
+- no business logic exists in the web layer
+- the server binds to `127.0.0.1` only and refuses non-local origins
+- posting text renders escaped; a posting containing markup or instructions
+  cannot alter the page or the agent's behaviour
+
+---
+
+## Deferred — VPS Sync and Private Job Site
+
+**Not planned work.** These were phases 8 and 9. They are demoted to optional
+because RoleEye's goal is an agent anyone can run and schedule on their own
+machine, and a single-user tool already has a local portal.
+
+If remote access is wanted later, a tunnel to the local portal achieves it
+without an export format, a sync protocol, or a second datastore. Revisit only
+if a concrete need appears.
+
+The privacy rules for export (§27) still apply if this is ever built.
+
+---
+
 ## Phase 7 — Career Memory / Local RAG
+
+Speculative. Build only if the tool is still in daily use and the database holds
+enough history for semantic retrieval to beat structured search.
 
 Build:
 
@@ -1588,41 +1642,11 @@ combines structured constraints and semantic relevance correctly.
 
 ---
 
-## Phase 8 — VPS Sync
+## Phase 8 — Learning Loop
 
-Build:
-
-- private/public export
-- sanitization
-- manifest/checksum
-- secure sync
-- VPS importer
-- read store
-
-Acceptance:
-
-- public export contains no private fields
-- private sync is incremental/idempotent
-- local data remains authoritative
-
----
-
-## Phase 9 — Private Job-Site Integration
-
-Build separately after core CLI is reliable:
-
-- authenticated read-only API
-- dashboard
-- job history
-- application timeline
-- search
-- analytics
-
-Do not move core agent business logic into the web application.
-
----
-
-## Phase 10 — Learning Loop
+Speculative, and dependent on feedback captured much earlier: application
+overrides are recorded from Phase 5 onward precisely so this phase has data to
+learn from.
 
 Build:
 

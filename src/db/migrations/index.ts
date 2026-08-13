@@ -2,11 +2,12 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { migration001, type Migration } from './001-initial.js';
 import { migration002 } from './002-scope.js';
 import { migration003 } from './003-source-postings.js';
+import { migration004 } from './004-screening.js';
 import { nowIso } from '../../util/time.js';
 import type { Logger } from '../../util/logger.js';
 
 /** Ordered list of migrations. Append only; never edit an applied migration. */
-export const migrations: readonly Migration[] = [migration001, migration002, migration003];
+export const migrations: readonly Migration[] = [migration001, migration002, migration003, migration004];
 
 export type { Migration };
 

@@ -10,15 +10,16 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | — | Pre-Phase-2 security review and hardening | done |
 | 2 | Lever, Ashby, career pages, discovery scope config, capture modes, `add`, `scope test` | done |
 | 2.5 | Cross-model review; source/job separation (migration 003), closure lifecycle, bug fixes | done |
-| 3 | Criteria engine, hard filters, authenticity screening, Advocate/Skeptic/Judge, evaluation cache, spend accounting, `evaluate` + `recommend` + `verify` | not started |
-| 3.5 | Notifier, daily digest, `schedule install`, local portal (`roleeye ui`) | not started |
+| 3a | Criteria engine, hard filters, authenticity screening, backup, scheduling, interactive init | done |
+| 3b | Requirement extraction, reasoning provider, evaluation, cache, spend accounting, `evaluate` + `recommend` | not started |
+| 3.5 | Notifier, daily digest | not started |
 | 4 | Fact store, `.docx`/`.pdf` import as draft facts, tailored resume, claim validation, resume diff, `.docx` output | not started |
-| 5 | Application entity, state history, notes | not started |
-| 6 | SQL search, FTS5, funnel + segment analytics, `stats`, basic `ask` | not started |
-| 7 | Career memory / local RAG, embeddings, query planner, hybrid retrieval | not started |
-| 8 | Private/public export, sanitization, manifest + checksums, secure sync, VPS importer | not started |
-| 9 | Private job-site read-only API and dashboard | not started |
-| 10 | Learning loop / outcome correlation | not started |
+| 5 | Application tracking, state history, notes, recommendation overrides | not started |
+| 6 | SQL search, FTS5, funnel + segment analytics, `stats` | not started |
+| 6.5 | Local portal | not started |
+| 7 | Career memory / local RAG | speculative |
+| 8 | Learning loop | speculative |
+| — | VPS sync and private job site | deferred, not planned |
 
 ## Decisions log
 
@@ -48,6 +49,58 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-13 | Evaluations reference a snapshot, a content hash, and profile/criteria hashes. | Without them a verdict cannot be attributed to the body that produced it, cannot be marked stale after an edit, and the documented cache key cannot be implemented. |
 | 2026-08-13 | Postings close only after a source run succeeds, and a role closes only when every posting closes. | `closed_at` was previously never set at all. A failed fetch must never retire live roles (architecture.md §30). |
 | 2026-08-13 | The per-scan cap defers unseen roles instead of truncating the fetch. | Truncating stopped refreshing known roles — which would eventually close live jobs — and could hide the same role forever if it sat past the cap in the provider's ordering. |
+
+## Phase 3a notes
+
+A third model (Claude Opus 4.6) reviewed the forward plan before this phase. Its
+findings changed the sequencing:
+
+- Phase 3 was split. 3a is entirely deterministic — no model, no spend — so hard
+  filters could be used immediately without waiting for evaluation to be good.
+- The portal moved from 3.5 to 6.5. Its own justification was that "the CLI
+  proves the workflow", and the workflow is not proven until applications are
+  tracked.
+- VPS sync and the private job site were demoted out of the plan entirely. The
+  goal is an agent anyone can run and schedule on their own machine.
+- Feedback capture moves earlier: application overrides are recorded from Phase 5
+  so the learning loop has data long before it is built.
+- Resume fact approval will be per experience block, not per fact. Approving 60
+  atomic facts is a form nobody fills in honestly.
+
+Built in 3a:
+
+- criteria engine with a content-derived hash, so editing a threshold correctly
+  invalidates cached decisions without a hand-maintained version field
+- deterministic hard filters with explicit `pass` / `reject` / `unknown`, and a
+  configurable policy for missing data. Most postings state no salary, so
+  rejecting all of them by default would be useless; the default flags instead
+- authenticity screening across four independent dimensions
+- `roleeye screen`, `roleeye verify`, `roleeye backup`, `roleeye schedule`,
+  and `roleeye init --interactive`
+- migration 004: `job_screenings`, `llm_calls`, and a content-only key
+
+### The fraud patterns had to be rewritten after live testing
+
+The first version blocked a legitimate Shield AI avionics role. It matched
+"**wire** harnesses ... **equipment** procurement" — ordinary job duties. A
+confident false accusation is far more damaging than a missed scam, because the
+user stops trusting every verdict the tool produces.
+
+Every payment pattern now requires the applicant to be the party paying, and the
+messaging-app and free-email patterns require an instruction to make contact
+that way. Validated across 273 real postings from two companies: zero signals
+fired. The avionics text and four similar phrasings are pinned as regression
+tests.
+
+### Other decisions
+
+- Backups use `VACUUM INTO`, which is synchronous, so a migration cannot begin
+  before the snapshot exists. A failed backup aborts the migration.
+- The content-only key exists because `fingerprint` and `cluster_key` both
+  include the company, so neither could ever answer "is this same description
+  being advertised by unrelated companies?"
+- Scheduling builds its command as data and supports `--print`, because a tool
+  that edits your crontab should show you the line first.
 
 ## Phase 2.5 notes
 

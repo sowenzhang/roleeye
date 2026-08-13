@@ -5,6 +5,7 @@ import { SourcePostingRepository } from './source-postings.js';
 import { SnapshotRepository } from './snapshots.js';
 import { JobEventRepository } from './job-events.js';
 import { ScanRepository } from './scans.js';
+import { ScreeningRepository, LlmCallRepository } from './screenings.js';
 
 export interface Repositories {
   companies: CompanyRepository;
@@ -13,6 +14,8 @@ export interface Repositories {
   snapshots: SnapshotRepository;
   events: JobEventRepository;
   scans: ScanRepository;
+  screenings: ScreeningRepository;
+  llmCalls: LlmCallRepository;
 }
 
 export function createRepositories(db: Database): Repositories {
@@ -23,6 +26,8 @@ export function createRepositories(db: Database): Repositories {
     snapshots: new SnapshotRepository(db),
     events: new JobEventRepository(db),
     scans: new ScanRepository(db),
+    screenings: new ScreeningRepository(db),
+    llmCalls: new LlmCallRepository(db),
   };
 }
 
@@ -33,7 +38,10 @@ export {
   SnapshotRepository,
   JobEventRepository,
   ScanRepository,
+  ScreeningRepository,
+  LlmCallRepository,
 };
 export type { JobRecord, JobListFilters, ScopeState } from './jobs.js';
 export type { SourcePosting } from './source-postings.js';
 export type { SourceRunResult } from './scans.js';
+export type { Screening, SpendSummary } from './screenings.js';

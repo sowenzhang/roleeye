@@ -93,6 +93,18 @@ export function computeClusterKey(input: {
   );
 }
 
+/**
+ * Content alone: no company, no location, no title.
+ *
+ * Answers "is this exact description being advertised by unrelated companies?",
+ * which `fingerprint` and `computeClusterKey` cannot, because both include the
+ * company by design.
+ */
+export function computeContentKey(descriptionText: string): string | undefined {
+  if (descriptionText.trim().length === 0) return undefined;
+  return descriptionFingerprint(descriptionText);
+}
+
 /** Exact-content hash, used to detect that a posting changed. */
 export function descriptionHash(description: string): string {
   return sha256(description.trim());

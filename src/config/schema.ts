@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { budgetSchema, screeningSchema, unknownHandlingSchema } from './screening-schema.js';
 
 const weightSchema = z.number().int().min(0).max(100);
 
@@ -44,12 +45,17 @@ export const criteriaSchema = z
             currency: z.string().default('USD'),
           })
           .optional(),
+        /** What a filter does when the posting does not state the fact it needs. */
+        on_unknown: unknownHandlingSchema,
       })
       .default({
         countries: [],
         require_us_payroll: false,
         relocation: { reject_if_required: true },
+        on_unknown: { salary: 'flag', country: 'flag' },
       }),
+    screening: screeningSchema,
+    budget: budgetSchema,
     penalties: z.record(z.union([z.number(), z.record(z.number())])).default({}),
     preferences: z
       .object({

@@ -6,7 +6,14 @@ import type {
   WorkArrangement,
 } from '../core/types.js';
 import { normalizeCompanyName } from './company.js';
-import { computeFingerprint, computeClusterKey, descriptionHash, resolveIdentity, type IdentityTier } from './identity.js';
+import {
+  computeFingerprint,
+  computeClusterKey,
+  computeContentKey,
+  descriptionHash,
+  resolveIdentity,
+  type IdentityTier,
+} from './identity.js';
 import { normalizeLocation } from './location.js';
 import { findSalaryInDescription, parseSalary } from './salary.js';
 import { htmlToText, looksLikeHtml, normalizeWhitespace, normalizeInlineText, capDescription } from './text.js';
@@ -43,6 +50,8 @@ export interface NormalizedJob {
   fingerprint: string;
   /** Location-independent clustering key; undefined when no body is available. */
   clusterKey: string | undefined;
+  /** Content-only key, for detecting the same text under different companies. */
+  contentKey: string | undefined;
   postedAt: string | undefined;
   rawPayload: string | undefined;
 }
@@ -116,6 +125,7 @@ export function normalizeDiscoveredJob(discovered: DiscoveredJob): NormalizedJob
       normalizedTitle: normalizeTitle(title),
       descriptionText,
     }),
+    contentKey: computeContentKey(descriptionText),
     postedAt: discovered.postedAt,
     rawPayload: serializeRawPayload(discovered.rawPayload),
   };

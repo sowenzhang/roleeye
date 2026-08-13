@@ -1,8 +1,9 @@
 import BetterSqlite3 from 'better-sqlite3';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { Logger } from '../util/logger.js';
-import { runMigrations } from './migrations/index.js';
+import { backupDatabase } from '../util/backup.js';
+import { pendingMigrations, runMigrations } from './migrations/index.js';
 
 export type Database = BetterSqlite3.Database;
 
@@ -11,6 +12,8 @@ export interface OpenDatabaseOptions {
   path: string;
   readonly?: boolean;
   migrate?: boolean;
+  /** Disables the automatic pre-migration snapshot. Tests use this. */
+  backupBeforeMigrate?: boolean;
   logger?: Logger;
 }
 
@@ -19,10 +22,38 @@ export interface OpenDatabaseOptions {
  * system. WAL mode keeps a long scan from blocking reads in another terminal.
  */
 export function openDatabase(options: OpenDatabaseOptions): Database {
-  const { path: dbPath, readonly = false, migrate = true, logger } = options;
+  const { path: dbPath, readonly = false, migrate = true, backupBeforeMigrate = true, logger } = options;
 
   if (dbPath !== ':memory:') {
     mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
+  }
+
+  // A schema change is the likeliest way to lose the only copy of the data, so
+  // snapshot first and only then migrate.
+  if (migrate && !readonly && backupBeforeMigrate && dbPath !== ':memory:' && existsSync(dbPath)) {
+    const probe = new BetterSqlite3(dbPath, { readonly: true });
+    let pending = 0;
+    try {
+      pending = pendingMigrations(probe).length;
+    } catch {
+      pending = 0;
+    } finally {
+      probe.close();
+    }
+
+    if (pending > 0) {
+      try {
+        const result = backupDatabase({ dbPath, label: 'pre-migration', logger });
+        if (!result.skipped) {
+          logger?.info('pre-migration backup written', { path: result.path, bytes: result.bytes });
+        }
+      } catch (error) {
+        // A schema change without a snapshot is exactly the risk this guards.
+        throw new Error(
+          `refusing to migrate without a backup: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
   }
 
   const db = new BetterSqlite3(dbPath, { readonly });

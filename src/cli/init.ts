@@ -1,9 +1,12 @@
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { ExitCode } from '../util/errors.js';
+import { ExitCode, type ExitCodeValue } from '../util/errors.js';
 import { openDatabase } from '../db/database.js';
 import { resolvePaths } from '../config/paths.js';
+import { criteriaSchema, sourcesSchema } from '../config/schema.js';
 import { flagBool } from './args.js';
+import { createPrompter } from './prompt.js';
+import { buildCriteriaYaml, buildSourcesYaml, interview } from './setup.js';
 import { printJson, printLine, type Command, type CommandContext } from './command.js';
 
 interface CopyPlan {
@@ -24,13 +27,104 @@ const PROFILE_FILES: ReadonlyArray<readonly [string, string]> = [
  */
 export const initCommand: Command = {
   name: 'init',
-  summary: 'Create local config/profile files from the committed examples',
-  usage: 'roleeye init [--force] [--json]',
+  summary: 'Set up local config, profile files, and the database',
+  usage: 'roleeye init [--interactive] [--force] [--json]',
 
-  run(context: CommandContext) {
+  async run(context: CommandContext) {
     const paths = resolvePaths(context.root);
     const force = flagBool(context.args, 'force');
 
+    if (flagBool(context.args, 'interactive')) {
+      return runInteractive(context, paths, force);
+    }
+
+    return runFromExamples(context, paths, force);
+  },
+};
+
+/**
+ * A short interview that produces working configuration.
+ *
+ * Without this the first run is "read the docs, write YAML, hope", which is
+ * where most self-hosted tools lose people before they see any value.
+ */
+async function runInteractive(
+  context: CommandContext,
+  paths: ReturnType<typeof resolvePaths>,
+  force: boolean,
+): Promise<ExitCodeValue> {
+  const criteriaFile = path.join(paths.configDir, 'criteria.yaml');
+  const sourcesFile = path.join(paths.configDir, 'sources.yaml');
+
+  const blocking = [criteriaFile, sourcesFile].filter((file) => existsSync(file));
+  if (blocking.length > 0 && !force) {
+    printLine(context, 'Configuration already exists:');
+    for (const file of blocking) printLine(context, `  ${path.relative(context.root, file)}`);
+    printLine(context);
+    printLine(context, 'Re-run with --force to replace it.');
+    return ExitCode.Ok;
+  }
+
+  printLine(context, 'roleeye setup');
+  printLine(context);
+  printLine(context, 'A few questions, then RoleEye is ready to scan. Press enter to accept a default.');
+  printLine(context);
+
+  const prompter = createPrompter();
+  let answers;
+  try {
+    answers = await interview(prompter);
+  } finally {
+    prompter.close();
+  }
+
+  const sourcesYaml = buildSourcesYaml(answers);
+  const criteriaYaml = buildCriteriaYaml(answers);
+
+  // Never write configuration the loader would then reject.
+  const { parse } = await import('yaml');
+  const sourcesCheck = sourcesSchema.safeParse(parse(sourcesYaml));
+  const criteriaCheck = criteriaSchema.safeParse(parse(criteriaYaml));
+
+  if (!sourcesCheck.success || !criteriaCheck.success) {
+    context.logger.error('generated configuration failed validation', {
+      sources: sourcesCheck.success ? 'ok' : sourcesCheck.error.issues[0]?.message,
+      criteria: criteriaCheck.success ? 'ok' : criteriaCheck.error.issues[0]?.message,
+    });
+    return ExitCode.ConfigError;
+  }
+
+  mkdirSync(paths.configDir, { recursive: true });
+  writeFileSync(sourcesFile, sourcesYaml);
+  writeFileSync(criteriaFile, criteriaYaml);
+
+  for (const dir of [paths.dataDir, paths.artifactsDir, paths.exportDir]) {
+    mkdirSync(dir, { recursive: true });
+  }
+  openDatabase({ path: paths.dbPath, logger: context.logger }).close();
+
+  printLine(context);
+  printLine(context, `  wrote ${path.relative(context.root, sourcesFile)}`);
+  printLine(context, `  wrote ${path.relative(context.root, criteriaFile)}`);
+  printLine(context);
+
+  if (answers.boards.length === 0) {
+    printLine(context, 'No boards configured yet. Add one to config/sources.yaml, then run `roleeye scan`.');
+  } else {
+    printLine(context, 'Next:');
+    printLine(context, '  roleeye scan            fetch the boards you listed');
+    printLine(context, '  roleeye screen          filter them against your rules');
+    printLine(context, '  roleeye schedule install --at 07:30');
+  }
+
+  return ExitCode.Ok;
+}
+
+function runFromExamples(
+  context: CommandContext,
+  paths: ReturnType<typeof resolvePaths>,
+  force: boolean,
+): ExitCodeValue {
     const plans: CopyPlan[] = [
       ...CONFIG_FILES.map((name) => ({
         from: path.join(paths.configDir, `${name}.example.yaml`),
@@ -90,7 +184,7 @@ export const initCommand: Command = {
     printLine(context, `  database ${path.relative(context.root, paths.dbPath)}`);
     printLine(context);
     printLine(context, 'Next: edit config/sources.yaml, then run `roleeye scan`.');
+    printLine(context, 'Or run `roleeye init --interactive` to be asked a few questions instead.');
 
     return ExitCode.Ok;
-  },
-};
+}
