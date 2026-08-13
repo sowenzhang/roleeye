@@ -9,6 +9,7 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 1 | Source adapter interface, Greenhouse adapter, normalize, dedupe, snapshots, source runs, `scan` + `show` | done |
 | — | Pre-Phase-2 security review and hardening | done |
 | 2 | Lever, Ashby, career pages, discovery scope config, capture modes, `add`, `scope test` | done |
+| 2.5 | Cross-model review; source/job separation (migration 003), closure lifecycle, bug fixes | done |
 | 3 | Criteria engine, hard filters, authenticity screening, Advocate/Skeptic/Judge, evaluation cache, spend accounting, `evaluate` + `recommend` + `verify` | not started |
 | 3.5 | Notifier, daily digest, `schedule install`, local portal (`roleeye ui`) | not started |
 | 4 | Fact store, `.docx`/`.pdf` import as draft facts, tailored resume, claim validation, resume diff, `.docx` output | not started |
@@ -41,6 +42,46 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-13 | The career-page adapter reads only schema.org `JobPosting` data and refuses to guess from arbitrary markup. | Heuristic scraping produces silently wrong records, and a wrong record is worse than a missing one. The error names the linked ATS when it finds one. |
 | 2026-08-13 | Playwright stays an optional, dynamically imported peer rather than a dependency. | It is a large install most users never need, and architecture.md ranks browser automation last among discovery methods. |
 | 2026-08-13 | Salary parsing now requires explicit monetary evidence and plausibility bounds. | Real postings caused "$12.7B valuation" and "founded in 2015… 13 countries" to be stored as pay. Compensation feeds a Phase 3 hard filter, so a wrong number is worse than no number. |
+| 2026-08-13 | **Reversed**: the domain model is *not* fixed, and pre-creating Phase 3-5 tables was a mistake. | `jobs` conflated a logical role with one source posting, and `evaluations` had no link to the content it judged. Both had to be corrected before evaluation is built on them. |
+| 2026-08-13 | Migration 003 separates `jobs` (logical role) from `source_postings` (one row per advertising source). | The same role on two ATS providers merged by fingerprint, then alternated `source_job_id` every scan and reported a repost forever. Repost cadence is the primary ghost-job signal, so that noise had to go before Phase 3 depends on it. |
+| 2026-08-13 | Clustering uses a location-independent key requiring an identical body under the same company. | Recognises one role advertised on several providers or in several locations, while never merging on title similarity. An absent body never clusters. |
+| 2026-08-13 | Evaluations reference a snapshot, a content hash, and profile/criteria hashes. | Without them a verdict cannot be attributed to the body that produced it, cannot be marked stale after an edit, and the documented cache key cannot be implemented. |
+| 2026-08-13 | Postings close only after a source run succeeds, and a role closes only when every posting closes. | `closed_at` was previously never set at all. A failed fetch must never retire live roles (architecture.md §30). |
+| 2026-08-13 | The per-scan cap defers unseen roles instead of truncating the fetch. | Truncating stopped refreshing known roles — which would eventually close live jobs — and could hide the same role forever if it sat past the cap in the provider's ordering. |
+
+## Phase 2.5 notes
+
+Two models reviewed the codebase independently before Phase 3 (design critique by
+GPT-5.6 Sol, implementation review of the Phase 2 diff by Gemini 3.1 Pro). Every
+claim was reproduced before being acted on. Eight confirmed bugs:
+
+1. `history` capture overwrote a stored body with an empty string — a direct
+   violation of the preserve-history rule.
+2. Switching a source from `history` to `full` never backfilled the body, because
+   the stored hash already described content the database did not hold.
+3. An out-of-scope role stopped being refreshed entirely, so `in_scope` went
+   stale and `last_seen_at` froze.
+4. `max_new_per_source_per_scan` truncated the raw fetch (both reviewers).
+5. `gh_jid` was stripped as a tracking parameter, breaking embedded Greenhouse
+   capture — it identifies the posting, not a campaign.
+6. Greenhouse departments were declared in the payload type but never mapped, so
+   department scope filters silently did nothing for that provider.
+7. `closed_at` was never written anywhere: roles never closed, `--include-closed`
+   was meaningless, and the ghost-job longevity signal had no data.
+8. Salary still misparsed `"raised a $5M seed round. Salary is competitive."`,
+   and dropped valid JPY/INR salaries as implausible.
+
+Also corrected: ATS URL matchers used substring host checks; the browser fallback
+guarded only the top-level URL while Chromium fetched subresources unrestricted,
+and `docs/progress.md` had claimed otherwise.
+
+A sobering note: 171 tests passed while all of this was present. The suite largely
+confirmed the behaviour that was written rather than attacking it. The new tests
+in `tests/integration/dedupe.test.ts` are written the other way round.
+
+Migration 003 was verified against a populated database built by the previous
+release: 49 jobs, 31 snapshots, and 49 events migrated with zero orphans and zero
+foreign key violations, and the following scan was correctly idempotent.
 
 ## Phase 2 notes
 
@@ -77,8 +118,9 @@ Full report: `docs/security-review-phase1.md`. Spend analysis: `docs/spend-analy
 - Postings are now treated as untrusted input at a single boundary: control
   characters stripped, escaped markup unable to re-materialize, descriptions capped.
 - All outbound requests pass a URL guard (HTTPS only; private, loopback, and
-  link-local ranges blocked; every redirect hop re-validated). This must be
-  applied to every Phase 2 adapter, including `roleeye add <url>`.
+  link-local ranges blocked; every redirect hop re-validated). Applied to every
+  Phase 2 adapter, to `roleeye add <url>`, and — since Phase 2.5 — to every
+  subresource the browser fallback requests.
 - Log redaction covers URL-borne credentials and query-string secrets.
 - Lockfile provenance corrected; `npm audit` reports 0 vulnerabilities.
 - Measured corpus: median description 1,532 tokens, ~44% boilerplate

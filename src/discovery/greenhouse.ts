@@ -53,6 +53,14 @@ function descriptionOf(job: GreenhouseJob): string | undefined {
   return content;
 }
 
+function departmentOf(job: GreenhouseJob): string | undefined {
+  const names = (job.departments ?? [])
+    .map((department) => normalizeInlineText(department?.name ?? ''))
+    .filter((name) => name.length > 0 && name.toLowerCase() !== 'no department');
+
+  return names.length > 0 ? names.join(' / ') : undefined;
+}
+
 /** Pure mapping from an API payload to adapter output, so fixtures can test it offline. */
 export function parseGreenhouseBoard(
   payload: GreenhouseBoardResponse,
@@ -77,6 +85,7 @@ export function parseGreenhouseBoard(
         location: locationOf(job),
         url,
         applyUrl: url,
+        department: departmentOf(job),
         descriptionHtml: descriptionOf(job),
         postedAt: toIso(job.first_published ?? job.updated_at),
         rawPayload: job,

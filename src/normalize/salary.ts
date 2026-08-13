@@ -28,7 +28,7 @@ const NON_COMPENSATION_CONTEXT =
 const PAY_CONTEXT =
   /\b(salary|salaries|compensation|pay|paid|wage|earnings|remuneration|base|hourly rate|annual rate|per hour|per year|per annum|annually|hourly|otr|ote)\b/i;
 
-/** Plausibility bounds; anything outside is prose that happens to contain numbers. */
+/** Plausibility bounds in USD-equivalent terms; scaled per currency below. */
 const BOUNDS: Record<SalaryPeriod, { min: number; max: number }> = {
   hour: { min: 2, max: 2_000 },
   day: { min: 20, max: 20_000 },
@@ -37,11 +37,44 @@ const BOUNDS: Record<SalaryPeriod, { min: number; max: number }> = {
   year: { min: 5_000, max: 10_000_000 },
 };
 
+/**
+ * Order-of-magnitude multipliers for currencies whose unit is far smaller than
+ * a dollar. Without them a genuine ¥12,000,000 salary is discarded as
+ * implausible.
+ */
+const CURRENCY_SCALE: Record<string, number> = {
+  JPY: 150,
+  INR: 90,
+  KRW: 1_300,
+  IDR: 16_000,
+  VND: 25_000,
+  HUF: 350,
+  CLP: 950,
+  COP: 4_000,
+  NGN: 1_500,
+  ISK: 140,
+};
+
 const SALARY_KEYWORD = /\b(salary|salaries|compensation|pay|paid|base|wage|rate|earn|remuneration|package|range)\b/i;
 
-function isPlausible(amount: number, period: SalaryPeriod): boolean {
+function isPlausible(amount: number, period: SalaryPeriod, currency: string | undefined): boolean {
+  const scale = CURRENCY_SCALE[(currency ?? 'USD').toUpperCase()] ?? 1;
   const bounds = BOUNDS[period];
-  return amount >= bounds.min && amount <= bounds.max;
+  return amount >= bounds.min * scale && amount <= bounds.max * scale;
+}
+
+/**
+ * Requires pay wording close to the figure rather than anywhere in the text.
+ *
+ * "We raised a $5M seed round. Salary is competitive." contains a pay keyword,
+ * but not next to the only number in the sentence.
+ */
+function hasNearbyPayContext(text: string, matchIndex: number, matchLength: number): boolean {
+  const before = text.slice(Math.max(0, matchIndex - 60), matchIndex);
+  const after = text.slice(matchIndex + matchLength, matchIndex + matchLength + 60);
+
+  if (NON_COMPENSATION_CONTEXT.test(before) || NON_COMPENSATION_CONTEXT.test(after)) return false;
+  return PAY_CONTEXT.test(before) || PAY_CONTEXT.test(after);
 }
 
 /** Two adjacent four-digit years read as a range; "2015 to 2026" is not a salary. */
@@ -64,11 +97,9 @@ export function parseSalary(text: string | undefined | null): RawSalary | undefi
   if (!text) return undefined;
   const input = text.replace(/\s+/g, ' ');
 
-  // Valuations, funding rounds, and contract values are money, not pay.
-  if (NON_COMPENSATION_CONTEXT.test(input) && !/\b(salary|compensation|pay range|base pay)\b/i.test(input)) {
-    return undefined;
-  }
-
+  // Valuations, funding rounds, and contract values are money, not pay. The
+  // range and single-figure branches re-check this near the actual match, so a
+  // posting may still state a real salary in a different sentence.
   const currency = detectCurrency(input);
   const period = detectPeriod(input);
   const hasKeyword = SALARY_KEYWORD.test(input);
@@ -85,18 +116,28 @@ export function parseSalary(text: string | undefined | null): RawSalary | undefi
     const max = toAmount(raw2, suffix2);
 
     const monetary = Boolean(symbol1 ?? symbol2 ?? suffix1 ?? suffix2) || (currency !== undefined && hasKeyword);
+    const contextOk =
+      !NON_COMPENSATION_CONTEXT.test(input) || hasNearbyPayContext(input, range.index, range[0].length);
 
-    if (monetary && min !== undefined && max !== undefined && max >= min && !looksLikeYearRange(min, max)) {
+    if (
+      monetary &&
+      contextOk &&
+      min !== undefined &&
+      max !== undefined &&
+      max >= min &&
+      !looksLikeYearRange(min, max)
+    ) {
       const built = build(min, max, currency, period, input);
       if (built) return built;
     }
   }
 
-  // A single figure needs a currency symbol directly in front of it, plus
-  // explicit pay context: "$12.7B valuation" is money, not a salary.
+  // A single figure needs a currency symbol in front of it and pay wording next
+  // to it: "$12.7B valuation" and "raised $5M ... salary is competitive" are
+  // both money, neither is this role's pay.
   const singlePattern = new RegExp(String.raw`([$£€₹¥])\s*${AMOUNT}`, 'i');
   const single = singlePattern.exec(input);
-  if (single && PAY_CONTEXT.test(input)) {
+  if (single && hasNearbyPayContext(input, single.index, single[0].length)) {
     const value = toAmount(single[2], single[3]);
     if (value !== undefined) return build(value, value, currency, period, input);
   }
@@ -111,8 +152,8 @@ function build(
   period: SalaryPeriod | undefined,
   text: string,
 ): RawSalary | undefined {
-  const resolvedPeriod = period ?? inferPeriodFromMagnitude(min);
-  if (!isPlausible(min, resolvedPeriod) || !isPlausible(max, resolvedPeriod)) return undefined;
+  const resolvedPeriod = period ?? inferPeriodFromMagnitude(min, currency);
+  if (!isPlausible(min, resolvedPeriod, currency) || !isPlausible(max, resolvedPeriod, currency)) return undefined;
 
   return {
     min,
@@ -162,9 +203,10 @@ export function detectPeriod(text: string): SalaryPeriod | undefined {
   return undefined;
 }
 
-function inferPeriodFromMagnitude(amount: number): SalaryPeriod {
-  if (amount < 500) return 'hour';
-  if (amount < 5_000) return 'week';
+function inferPeriodFromMagnitude(amount: number, currency?: string | undefined): SalaryPeriod {
+  const scale = CURRENCY_SCALE[(currency ?? 'USD').toUpperCase()] ?? 1;
+  if (amount < 500 * scale) return 'hour';
+  if (amount < 5_000 * scale) return 'week';
   return 'year';
 }
 

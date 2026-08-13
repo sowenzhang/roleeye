@@ -28,6 +28,7 @@ function mapRow(row: SnapshotRow): JobSnapshot {
 
 export interface SnapshotInput {
   jobId: string;
+  postingId: string;
   capturedAt: IsoTimestamp;
   sourceUrl: string;
   rawPayload: string | undefined;
@@ -53,12 +54,15 @@ export class SnapshotRepository {
     this.db
       .prepare(
         `INSERT INTO job_snapshots (
-           id, job_id, captured_at, source_url, raw_payload, raw_html_path, normalized_description, description_hash
-         ) VALUES (@id, @job_id, @captured_at, @source_url, @raw_payload, NULL, @normalized_description, @description_hash)`,
+           id, job_id, posting_id, captured_at, source_url, raw_payload, raw_html_path,
+           normalized_description, description_hash
+         ) VALUES (@id, @job_id, @posting_id, @captured_at, @source_url, @raw_payload, NULL,
+           @normalized_description, @description_hash)`,
       )
       .run({
         id,
         job_id: input.jobId,
+        posting_id: input.postingId,
         captured_at: input.capturedAt,
         source_url: input.sourceUrl,
         raw_payload: toDb(input.rawPayload),

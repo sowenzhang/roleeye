@@ -1,20 +1,28 @@
 import type { DiscoveredJob, JobEventType } from '../core/types.js';
 import type { CaptureMode } from '../config/schema.js';
 import type { Repositories } from '../db/repositories/index.js';
-import type { JobWithCompany } from '../db/repositories/jobs.js';
+import type { SourcePosting } from '../db/repositories/source-postings.js';
 import { normalizeDiscoveredJob, type NormalizedJob } from '../normalize/job.js';
 import { classifyReappearance } from '../normalize/repost.js';
 import { evaluateScope, type EffectiveScope } from './scope.js';
 import type { IsoTimestamp } from '../util/time.js';
 
-export type IngestOutcome = 'new' | 'changed' | 'reposted' | 'unchanged';
+export type IngestOutcome = 'new' | 'changed' | 'reposted' | 'unchanged' | 'skipped' | 'deferred';
+
+export type PostingMatch = 'identity-key' | 'source-url' | 'none';
+export type JobMatch = 'cluster-key' | 'new';
 
 export interface IngestResult {
-  jobId: string;
+  jobId: string | undefined;
+  postingId: string | undefined;
   outcome: IngestOutcome;
-  matchedBy: 'identity-key' | 'canonical-url' | 'fingerprint' | 'none';
+  /** How the incoming posting matched a stored posting. */
+  matchedBy: PostingMatch;
+  /** How the posting was attached to a logical role. */
+  clusteredBy: JobMatch | undefined;
   detail: string | undefined;
   inScope: boolean;
+  isNewPosting: boolean;
 }
 
 export interface IngestOptions {
@@ -23,27 +31,36 @@ export interface IngestOptions {
   repostGapDays: number;
   captureMode?: CaptureMode | undefined;
   scope?: EffectiveScope | undefined;
+  /** Manual capture ignores scope: a human already decided this role matters. */
+  ignoreScope?: boolean | undefined;
+  /**
+   * When false, a posting we have never seen is left for the next scan instead
+   * of being stored. Known postings are always refreshed, so a cap can never
+   * stop us observing roles we already track.
+   */
+  allowNew?: boolean | undefined;
 }
 
 /**
- * Resolves an incoming posting to an existing job using the identity hierarchy
- * from architecture.md §12. Titles alone never merge two jobs.
+ * Finds the stored posting this observation refers to.
+ *
+ * Matching stays within one source. Two providers advertising the same role are
+ * two postings, not one posting that keeps changing identity — conflating them
+ * is what made every scan report a repost.
  */
-function findExisting(
+function findPosting(
   repos: Repositories,
   normalized: NormalizedJob,
-): { job: JobWithCompany; matchedBy: IngestResult['matchedBy'] } | undefined {
-  const byKey = repos.jobs.findByIdentityKey(normalized.identityKey);
-  if (byKey) return { job: byKey, matchedBy: 'identity-key' };
+): { posting: SourcePosting; matchedBy: PostingMatch } | undefined {
+  const byKey = repos.postings.findByIdentityKey(normalized.identityKey);
+  if (byKey) return { posting: byKey, matchedBy: 'identity-key' };
 
+  // Same source, same URL, new id: an ATS reissued the requisition.
   const url = normalized.canonicalUrl ?? normalized.applyUrl;
   if (url) {
-    const byUrl = repos.jobs.findByCanonicalUrl(url);
-    if (byUrl) return { job: byUrl, matchedBy: 'canonical-url' };
+    const byUrl = repos.postings.findBySourceAndUrl(normalized.sourceName, url);
+    if (byUrl) return { posting: byUrl, matchedBy: 'source-url' };
   }
-
-  const byFingerprint = repos.jobs.findByFingerprint(normalized.fingerprint);
-  if (byFingerprint) return { job: byFingerprint, matchedBy: 'fingerprint' };
 
   return undefined;
 }
@@ -51,111 +68,197 @@ function findExisting(
 /**
  * Ingests one discovered posting.
  *
- * Idempotent: running the same scan twice produces one job, one snapshot per
- * distinct content, and one event per observation.
+ * Idempotent: repeating a scan yields one job, one posting per source, one
+ * snapshot per distinct body, and one event per observation.
  *
- * Capture mode decides how much is kept. `scoped` skips out-of-scope postings
- * entirely, `history` keeps metadata without the body, and `full` keeps
- * everything while still recording the scope decision.
+ * Capture mode controls how much is kept. `scoped` does not start tracking
+ * out-of-scope roles but still refreshes ones already stored, so a role leaving
+ * scope does not silently stop being observed. `history` keeps identity and
+ * metadata without the body. `full` keeps everything.
  */
-export function ingestJob(
-  repos: Repositories,
-  discovered: DiscoveredJob,
-  options: IngestOptions,
-): IngestResult | undefined {
+export function ingestJob(repos: Repositories, discovered: DiscoveredJob, options: IngestOptions): IngestResult {
   const captureMode: CaptureMode = options.captureMode ?? 'scoped';
-  let normalized = normalizeDiscoveredJob(discovered);
+  const normalized = normalizeDiscoveredJob(discovered);
+  const keepBody = captureMode !== 'history';
 
-  const verdict = options.scope
-    ? evaluateScope(
-        {
-          title: normalized.title,
-          level: normalized.level,
-          department: normalized.department,
-          team: normalized.team,
-          locationText: normalized.locationText,
-          country: normalized.country,
-          workArrangement: normalized.workArrangement,
-          postedAt: normalized.postedAt,
-        },
-        options.scope,
-        options.seenAt,
-      )
-    : { inScope: true, reason: undefined };
+  const verdict =
+    options.scope && !options.ignoreScope
+      ? evaluateScope(
+          {
+            title: normalized.title,
+            level: normalized.level,
+            department: normalized.department,
+            team: normalized.team,
+            locationText: normalized.locationText,
+            country: normalized.country,
+            workArrangement: normalized.workArrangement,
+            postedAt: normalized.postedAt,
+          },
+          options.scope,
+          options.seenAt,
+        )
+      : { inScope: true, reason: undefined };
 
-  // `scoped` is the default: out-of-scope roles are never stored, so the
-  // database stays about roles the user actually cares about.
-  if (!verdict.inScope && captureMode === 'scoped') return undefined;
+  const scopeState = { inScope: verdict.inScope, scopeReason: verdict.reason };
+  const existing = findPosting(repos, normalized);
 
-  // `history` keeps the market record without paying to store or analyze bodies.
-  if (captureMode === 'history') {
-    normalized = stripBody(normalized);
-  }
-
-  const company = repos.companies.upsertByName(normalized.companyName);
-  const existing = findExisting(repos, normalized);
-
-  if (!existing) {
-    const job = repos.jobs.insert(normalized, company.id, options.seenAt, {
-      captureMode,
-      inScope: verdict.inScope,
-      scopeReason: verdict.reason,
-    });
-
-    if (normalized.descriptionText.length > 0) {
-      repos.snapshots.insertIfNew({
-        jobId: job.id,
-        capturedAt: options.seenAt,
-        sourceUrl: normalized.sourceUrl,
-        rawPayload: normalized.rawPayload,
-        normalizedDescription: normalized.descriptionText,
-        descriptionHash: normalized.descriptionHash,
-      });
-    }
-
-    repos.events.insert({
-      jobId: job.id,
-      seenAt: options.seenAt,
-      sourceType: normalized.sourceType,
-      sourceJobId: normalized.sourceJobId,
-      url: normalized.sourceUrl,
-      eventType: 'discovered',
-      detail: verdict.inScope ? undefined : `out of scope: ${verdict.reason ?? 'unspecified'}`,
-      scanId: options.scanId,
-    });
-
+  // Out of scope and not already tracked: do not start tracking it.
+  if (!verdict.inScope && captureMode === 'scoped' && !existing) {
     return {
-      jobId: job.id,
-      outcome: 'new',
+      jobId: undefined,
+      postingId: undefined,
+      outcome: 'skipped',
       matchedBy: 'none',
-      detail: undefined,
-      inScope: verdict.inScope,
+      clusteredBy: undefined,
+      detail: verdict.reason,
+      inScope: false,
+      isNewPosting: false,
     };
   }
 
-  const job = existing.job;
+  // Over the per-scan cap for new roles. Deferred, not dropped: the next scan
+  // sees it again, because nothing about it was recorded.
+  if (!existing && options.allowNew === false) {
+    return {
+      jobId: undefined,
+      postingId: undefined,
+      outcome: 'deferred',
+      matchedBy: 'none',
+      clusteredBy: undefined,
+      detail: 'per-scan cap for new roles reached',
+      inScope: verdict.inScope,
+      isNewPosting: false,
+    };
+  }
+
+  const stored = keepBody ? normalized : withoutBody(normalized);
+
+  return existing
+    ? updateExisting(repos, existing, normalized, stored, options, captureMode, scopeState, keepBody)
+    : insertNew(repos, normalized, stored, options, captureMode, scopeState, keepBody);
+}
+
+interface ScopeState {
+  inScope: boolean;
+  scopeReason: string | undefined;
+}
+
+function insertNew(
+  repos: Repositories,
+  normalized: NormalizedJob,
+  stored: NormalizedJob,
+  options: IngestOptions,
+  captureMode: CaptureMode,
+  scopeState: ScopeState,
+  keepBody: boolean,
+): IngestResult {
+  const company = repos.companies.upsertByName(normalized.companyName);
+
+  // Attach to an existing role when the same company already advertises
+  // identical content elsewhere; otherwise this is a new role.
+  const clustered = normalized.clusterKey
+    ? repos.jobs.findByClusterKey(company.id, normalized.clusterKey)
+    : undefined;
+
+  const job = clustered ?? repos.jobs.insert(stored, company.id, options.seenAt, scopeState);
+  const clusteredBy: JobMatch = clustered ? 'cluster-key' : 'new';
+
+  if (clustered) {
+    // A second source may carry a body the first one lacked.
+    repos.jobs.markSeen(job.id, stored, options.seenAt, {
+      updateContent: !clustered.hasBody && stored.descriptionText.length > 0,
+      scope: scopeState,
+    });
+  }
+
+  const hasBody = keepBody && normalized.descriptionText.length > 0;
+  const posting = repos.postings.insert(job.id, normalized, options.seenAt, { captureMode, hasBody });
+
+  if (hasBody) {
+    repos.snapshots.insertIfNew({
+      jobId: job.id,
+      postingId: posting.id,
+      capturedAt: options.seenAt,
+      sourceUrl: normalized.sourceUrl,
+      rawPayload: normalized.rawPayload,
+      normalizedDescription: normalized.descriptionText,
+      descriptionHash: normalized.descriptionHash,
+    });
+  }
+
+  repos.events.insert({
+    jobId: job.id,
+    postingId: posting.id,
+    seenAt: options.seenAt,
+    sourceType: normalized.sourceType,
+    sourceJobId: normalized.sourceJobId,
+    url: normalized.sourceUrl,
+    eventType: 'discovered',
+    detail: clustered
+      ? 'additional source for a known role'
+      : scopeState.inScope
+        ? undefined
+        : `out of scope: ${scopeState.scopeReason ?? 'unspecified'}`,
+    scanId: options.scanId,
+  });
+
+  return {
+    jobId: job.id,
+    postingId: posting.id,
+    outcome: 'new',
+    matchedBy: 'none',
+    clusteredBy,
+    detail: undefined,
+    inScope: scopeState.inScope,
+    isNewPosting: true,
+  };
+}
+
+function updateExisting(
+  repos: Repositories,
+  existing: { posting: SourcePosting; matchedBy: PostingMatch },
+  normalized: NormalizedJob,
+  stored: NormalizedJob,
+  options: IngestOptions,
+  captureMode: CaptureMode,
+  scopeState: ScopeState,
+  keepBody: boolean,
+): IngestResult {
+  const posting = existing.posting;
+  const job = repos.jobs.findById(posting.jobId);
+  if (!job) throw new Error(`posting ${posting.id} references missing job ${posting.jobId}`);
+
   const decision = classifyReappearance({
-    lastSeenAt: job.lastSeenAt,
-    closedAt: job.closedAt,
-    previousSourceJobId: job.sourceJobId,
+    lastSeenAt: posting.lastSeenAt,
+    closedAt: posting.closedAt,
+    previousSourceJobId: posting.sourceJobId,
     currentSourceJobId: normalized.sourceJobId,
-    previousDescriptionHash: job.descriptionHash,
+    previousDescriptionHash: posting.descriptionHash ?? '',
     currentDescriptionHash: normalized.descriptionHash,
     seenAt: options.seenAt,
     repostGapDays: options.repostGapDays,
   });
 
-  const contentChanged = job.descriptionHash !== normalized.descriptionHash;
-  repos.jobs.markSeen(job.id, normalized, options.seenAt, {
-    updateContent: contentChanged,
+  const contentChanged = posting.descriptionHash !== normalized.descriptionHash;
+  const incomingHasBody = keepBody && normalized.descriptionText.length > 0;
+
+  // A role first seen through a metadata-only source now has a body. Hashes
+  // match in that case, so content equality alone would never trigger a write.
+  const needsBackfill = incomingHasBody && !job.hasBody;
+  const writeContent = incomingHasBody && (contentChanged || needsBackfill);
+
+  repos.postings.markSeen(posting.id, normalized, options.seenAt, {
     captureMode,
-    inScope: verdict.inScope,
-    scopeReason: verdict.reason,
+    // Never downgrade a posting that already produced a stored body.
+    hasBody: incomingHasBody || posting.hasBody,
   });
 
-  if (contentChanged && normalized.descriptionText.length > 0) {
+  repos.jobs.markSeen(job.id, stored, options.seenAt, { updateContent: writeContent, scope: scopeState });
+
+  if (writeContent) {
     repos.snapshots.insertIfNew({
       jobId: job.id,
+      postingId: posting.id,
       capturedAt: options.seenAt,
       sourceUrl: normalized.sourceUrl,
       rawPayload: normalized.rawPayload,
@@ -167,6 +270,7 @@ export function ingestJob(
   const eventType: JobEventType = decision.eventType;
   repos.events.insert({
     jobId: job.id,
+    postingId: posting.id,
     seenAt: options.seenAt,
     sourceType: normalized.sourceType,
     sourceJobId: normalized.sourceJobId,
@@ -181,14 +285,23 @@ export function ingestJob(
 
   return {
     jobId: job.id,
+    postingId: posting.id,
     outcome,
     matchedBy: existing.matchedBy,
+    clusteredBy: undefined,
     detail: decision.reason,
-    inScope: verdict.inScope,
+    inScope: scopeState.inScope,
+    isNewPosting: false,
   };
 }
 
-/** Keeps identity and metadata; drops the body a `history` source does not need. */
-function stripBody(normalized: NormalizedJob): NormalizedJob {
+/**
+ * Drops the body for `history` capture while keeping the hash.
+ *
+ * The hash records what the source advertised even when the text is not
+ * retained, so a later switch to `full` recognises the body as new content
+ * rather than concluding nothing changed.
+ */
+function withoutBody(normalized: NormalizedJob): NormalizedJob {
   return { ...normalized, descriptionText: '', rawPayload: undefined };
 }

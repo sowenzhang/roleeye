@@ -41,7 +41,8 @@ export const scopeCommand: Command = {
       limit: flagNumber(context.args, 'limit') ?? 500,
       includeClosed: true,
       inScope: undefined,
-      sourceType: source?.type,
+      // Filter by the named source, not by everything sharing its provider type.
+      sourceName: source?.name,
     });
 
     const kept: Array<{ id: string; company: string; title: string }> = [];
@@ -57,7 +58,9 @@ export const scopeCommand: Command = {
           locationText: job.locationText,
           country: job.country,
           workArrangement: job.workArrangement,
-          postedAt: job.firstSeenAt,
+          // The real posting date when the source supplied one; discovery date
+          // otherwise, which is the closest honest approximation.
+          postedAt: job.postedAt ?? job.firstSeenAt,
         },
         scope,
       );

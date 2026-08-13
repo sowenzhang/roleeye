@@ -60,22 +60,24 @@ export const addCommand: Command = {
           repostGapDays: config.sources.dedupe.repost_gap_days,
           captureMode: 'full',
           scope: undefined,
+          // A human chose this URL, so scope has already been applied.
+          ignoreScope: true,
         }),
       ),
     );
 
-    const stored = results.flatMap((result) => (result ? [result] : []));
+    const stored = results.filter((result) => result.jobId !== undefined);
 
     if (context.json) {
       printJson(
         context,
-        stored.map((result) => ({ jobId: result.jobId, outcome: result.outcome })),
+        stored.map((result) => ({ jobId: result.jobId, postingId: result.postingId, outcome: result.outcome })),
       );
       return ExitCode.Ok;
     }
 
     for (const result of stored) {
-      const job = repos.jobs.findById(result.jobId);
+      const job = result.jobId ? repos.jobs.findById(result.jobId) : undefined;
       printLine(
         context,
         `${result.outcome === 'new' ? 'Captured' : 'Already known'}: ${job?.companyName ?? ''} — ${job?.title ?? ''}`,

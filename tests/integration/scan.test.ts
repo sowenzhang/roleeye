@@ -163,7 +163,7 @@ describe('scan pipeline', () => {
     assert.equal(repos.jobs.count(), 0);
   });
 
-  it('caps how many new postings a single source may contribute', async () => {
+  it('caps how many new roles a single source may contribute per scan', async () => {
     const config = buildConfig({
       sources: {
         sources: [{ name: 'examplecorp', type: 'greenhouse', company: 'Example Corp', board: 'examplecorp' }],
@@ -171,9 +171,34 @@ describe('scan pipeline', () => {
       },
     });
 
-    const summary = await runScan({ config, db, repos, logger: silentLogger, http: stubHttp() });
-    assert.equal(summary.sources[0]?.capped, 1);
+    const first = await runScan({ config, db, repos, logger: silentLogger, http: stubHttp() });
+    assert.equal(first.sources[0]?.deferred, 1);
     assert.equal(repos.jobs.count(), 2);
+
+    // Nothing was recorded about the deferred role, so the next scan picks it up.
+    const second = await runScan({ config, db, repos, logger: silentLogger, http: stubHttp() });
+    assert.equal(second.sources[0]?.new, 1, 'the deferred role is admitted next time');
+    assert.equal(repos.jobs.count(), 3);
+  });
+
+  it('keeps refreshing known roles while the cap defers new ones', async () => {
+    const uncapped = buildConfig({
+      sources: {
+        sources: [{ name: 'examplecorp', type: 'greenhouse', company: 'Example Corp', board: 'examplecorp' }],
+      },
+    });
+    await runScan({ config: uncapped, db, repos, logger: silentLogger, http: stubHttp() });
+
+    const capped = buildConfig({
+      sources: {
+        sources: [{ name: 'examplecorp', type: 'greenhouse', company: 'Example Corp', board: 'examplecorp' }],
+        discovery: { scope: { max_new_per_source_per_scan: 1 } },
+      },
+    });
+    const summary = await runScan({ config: capped, db, repos, logger: silentLogger, http: stubHttp() });
+
+    assert.equal(summary.sources[0]?.unchanged, 3, 'every known role is still observed');
+    assert.equal(summary.sources[0]?.closed, 0, 'and none of them is retired');
   });
 
   it('honours a per-source capture mode override', async () => {
@@ -196,9 +221,58 @@ describe('scan pipeline', () => {
     const jobs = repos.jobs.list({ limit: 10, inScope: undefined });
     assert.equal(jobs.length, 3);
     for (const job of jobs) {
-      assert.equal(job.captureMode, 'history');
       assert.equal(job.descriptionText, '');
+      assert.equal(repos.postings.listForJob(job.id)[0]?.captureMode, 'history');
     }
+  });
+
+  it('closes roles a source stopped advertising, but only after a successful run', async () => {
+    const config = buildConfig({
+      sources: {
+        sources: [{ name: 'examplecorp', type: 'greenhouse', company: 'Example Corp', board: 'examplecorp' }],
+      },
+    });
+
+    await runScan({ config, db, repos, logger: silentLogger, http: stubHttp() });
+    assert.equal(repos.jobs.count(), 3);
+
+    // The board now lists only the first role.
+    const shrunk: HttpClient = {
+      getText: async () => '',
+      getJson: async (url: string) => {
+        if (url !== boardUrl('examplecorp')) throw new Error('HTTP 503 Service Unavailable');
+        const payload = fixturePayload() as { jobs: unknown[] };
+        return { ...payload, jobs: payload.jobs.slice(0, 1) } as never;
+      },
+    };
+
+    const summary = await runScan({ config, db, repos, logger: silentLogger, http: shrunk });
+
+    assert.equal(summary.sources[0]?.closed, 2);
+    assert.equal(repos.jobs.list({ limit: 10 }).length, 1, 'closed roles leave the default listing');
+    assert.equal(repos.jobs.list({ limit: 10, includeClosed: true }).length, 3, 'nothing is deleted');
+  });
+
+  it('does not close anything when the source run fails', async () => {
+    const config = buildConfig({
+      sources: {
+        sources: [{ name: 'examplecorp', type: 'greenhouse', company: 'Example Corp', board: 'examplecorp' }],
+      },
+    });
+
+    await runScan({ config, db, repos, logger: silentLogger, http: stubHttp() });
+
+    const failing: HttpClient = {
+      getText: async () => '',
+      getJson: async () => {
+        throw new Error('HTTP 503 Service Unavailable');
+      },
+    };
+
+    const summary = await runScan({ config, db, repos, logger: silentLogger, http: failing });
+
+    assert.equal(summary.status, 'failed');
+    assert.equal(repos.jobs.list({ limit: 10 }).length, 3, 'a failed fetch must never retire live roles');
   });
 });
 

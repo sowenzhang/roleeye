@@ -123,7 +123,7 @@ describe('ingestion pipeline', () => {
     );
 
     assert.equal(relisted.outcome, 'reposted');
-    assert.equal(relisted.matchedBy, 'canonical-url');
+    assert.equal(relisted.matchedBy, 'source-url');
     assert.equal(repos.jobs.count(), 1);
   });
 

@@ -128,11 +128,17 @@ describe('browser fallback', () => {
 
   it('renders and closes the browser when playwright is available', async () => {
     let closed = false;
+    let routed = false;
+
     const rendered = await renderWithBrowser('https://example.com/careers', silentLogger, {
+      resolveHost: async () => ['93.184.216.34'],
       load: async () => ({
         chromium: {
           launch: async () => ({
             newPage: async () => ({
+              route: async () => {
+                routed = true;
+              },
               goto: async () => undefined,
               content: async () => '<html>rendered</html>',
             }),
@@ -145,7 +151,46 @@ describe('browser fallback', () => {
     });
 
     assert.equal(rendered, '<html>rendered</html>');
+    assert.equal(routed, true, 'subresource requests must be intercepted');
     assert.equal(closed, true, 'the browser must always be closed');
+  });
+
+  it('blocks a subresource request to a private address', async () => {
+    const blocked: string[] = [];
+    let handler: ((route: { request(): { url(): string }; abort(reason?: string): Promise<void>; continue(): Promise<void> }) => Promise<void> | void) | undefined;
+
+    await renderWithBrowser('https://example.com/careers', silentLogger, {
+      resolveHost: async () => ['93.184.216.34'],
+      load: async () => ({
+        chromium: {
+          launch: async () => ({
+            newPage: async () => ({
+              route: async (_pattern: string, fn: typeof handler) => {
+                handler = fn;
+              },
+              goto: async () => undefined,
+              content: async () => '<html>ok</html>',
+            }),
+            close: async () => undefined,
+          }),
+        },
+      }),
+    });
+
+    assert.ok(handler, 'a route handler is installed');
+
+    const route = (url: string) => ({
+      request: () => ({ url: () => url }),
+      abort: async () => {
+        blocked.push(url);
+      },
+      continue: async () => {},
+    });
+
+    await handler(route('http://169.254.169.254/latest/meta-data/'));
+    await handler(route('https://cdn.example.com/app.js'));
+
+    assert.deepEqual(blocked, ['http://169.254.169.254/latest/meta-data/']);
   });
 
   it('applies the url guard before launching a browser', async () => {
@@ -159,8 +204,7 @@ describe('browser fallback', () => {
       }),
     );
     assert.equal(launched, false, 'a blocked URL must not start a browser');
-  });
-});
+  });});
 
 describe('single-url capture', () => {
   it('recognizes greenhouse posting urls', () => {

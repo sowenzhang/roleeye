@@ -41,9 +41,10 @@ export const listCommand: Command = {
           level: job.level,
           location: job.locationText,
           workArrangement: job.workArrangement,
+          inScope: job.inScope,
           firstSeenAt: job.firstSeenAt,
           lastSeenAt: job.lastSeenAt,
-          url: job.canonicalUrl ?? job.sourceUrl,
+          closedAt: job.closedAt,
         })),
       );
       return ExitCode.Ok;

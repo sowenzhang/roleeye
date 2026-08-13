@@ -31,6 +31,7 @@ function mapRow(row: EventRow): JobSeenEvent {
 
 export interface EventInput {
   jobId: string;
+  postingId: string | undefined;
   seenAt: IsoTimestamp;
   sourceType: SourceType;
   sourceJobId: string | undefined;
@@ -48,12 +49,13 @@ export class JobEventRepository {
     const id = randomId('evt');
     this.db
       .prepare(
-        `INSERT INTO job_seen_events (id, job_id, seen_at, source_type, source_job_id, url, event_type, detail, scan_id)
-         VALUES (@id, @job_id, @seen_at, @source_type, @source_job_id, @url, @event_type, @detail, @scan_id)`,
+        `INSERT INTO job_seen_events (id, job_id, posting_id, seen_at, source_type, source_job_id, url, event_type, detail, scan_id)
+         VALUES (@id, @job_id, @posting_id, @seen_at, @source_type, @source_job_id, @url, @event_type, @detail, @scan_id)`,
       )
       .run({
         id,
         job_id: input.jobId,
+        posting_id: toDb(input.postingId),
         seen_at: input.seenAt,
         source_type: input.sourceType,
         source_job_id: toDb(input.sourceJobId),

@@ -1,11 +1,12 @@
 import { ExitCode, NotFoundError, UsageError } from '../util/errors.js';
-import type { JobWithCompany } from '../db/repositories/jobs.js';
+import type { JobRecord } from '../db/repositories/jobs.js';
+import type { SourcePosting } from '../db/repositories/source-postings.js';
 import type { Repositories } from '../db/repositories/index.js';
 import { truncate } from '../normalize/text.js';
 import { flagBool, flagNumber } from './args.js';
 import { printJson, printLine, type Command, type CommandContext } from './command.js';
 
-function resolveJob(repos: Repositories, reference: string): JobWithCompany {
+function resolveJob(repos: Repositories, reference: string): JobRecord {
   const exact = repos.jobs.findById(reference);
   if (exact) return exact;
 
@@ -22,7 +23,7 @@ function resolveJob(repos: Repositories, reference: string): JobWithCompany {
   throw new NotFoundError(`no job found for "${reference}"`);
 }
 
-function formatSalary(job: JobWithCompany): string {
+function formatSalary(job: JobRecord): string {
   if (job.salaryMin === undefined && job.salaryMax === undefined) return 'not stated';
 
   const currency = job.salaryCurrency ?? 'USD';
@@ -33,6 +34,18 @@ function formatSalary(job: JobWithCompany): string {
     return `${currency} ${format(job.salaryMin)} - ${format(job.salaryMax)} / ${period}`;
   }
   return `${currency} ${format(job.salaryMin ?? job.salaryMax ?? 0)} / ${period}`;
+}
+
+/** One line per source advertising the role, including retired ones. */
+function describePosting(posting: SourcePosting): string {
+  const parts = [
+    posting.sourceType,
+    posting.sourceName ? `/ ${posting.sourceName}` : '',
+    `[${posting.captureMode}]`,
+    posting.locationText ? `— ${posting.locationText}` : '',
+    posting.closedAt ? `— closed ${posting.closedAt.slice(0, 10)}` : '',
+  ];
+  return parts.filter((part) => part.length > 0).join(' ');
 }
 
 /** Shows the full local record for one job: metadata, history, and snapshots. */
@@ -48,6 +61,7 @@ export const showCommand: Command = {
     const { repos } = context.openDb();
     const job = resolveJob(repos, reference);
 
+    const postings = repos.postings.listForJob(job.id);
     const events = repos.events.listForJob(job.id);
     const snapshots = repos.snapshots.listForJob(job.id);
     const reposts = events.filter((event) => event.eventType === 'reposted');
@@ -55,6 +69,7 @@ export const showCommand: Command = {
     if (context.json) {
       printJson(context, {
         job,
+        postings,
         reposts: reposts.map((event) => ({ seenAt: event.seenAt, detail: event.detail })),
         events: events.map((event) => ({
           seenAt: event.seenAt,
@@ -82,21 +97,17 @@ export const showCommand: Command = {
     printLine(context, `  Location:     ${job.locationText ?? 'unspecified'}${job.country ? ` (${job.country})` : ''}`);
     printLine(context, `  Arrangement:  ${job.workArrangement}`);
     printLine(context, `  Compensation: ${formatSalary(job)}`);
-    printLine(context, `  Source:       ${job.sourceType}${job.sourceName ? ` / ${job.sourceName}` : ''}`);
-    printLine(context, `  Capture:      ${job.captureMode}${job.inScope ? '' : ` (out of scope: ${job.scopeReason ?? 'unspecified'})`}`);
-    printLine(context, `  Apply system: ${job.applicationSystem ?? 'unknown'}`);
-    printLine(context, `  URL:          ${job.canonicalUrl ?? job.sourceUrl}`);
+    printLine(context, `  Scope:        ${job.inScope ? 'in scope' : `out of scope (${job.scopeReason ?? 'unspecified'})`}`);
     printLine(context, `  First seen:   ${job.firstSeenAt}`);
     printLine(context, `  Last seen:    ${job.lastSeenAt}`);
     printLine(context, `  Status:       ${job.closedAt ? `closed ${job.closedAt}` : 'open'}`);
     printLine(context, `  Snapshots:    ${snapshots.length}`);
 
-    if (reposts.length > 0) {
-      printLine(context);
-      printLine(context, '  Reposts:');
-      for (const event of reposts) {
-        printLine(context, `    - ${event.seenAt}${event.detail ? ` (${event.detail})` : ''}`);
-      }
+    printLine(context);
+    printLine(context, `  Advertised by ${postings.length} source${postings.length === 1 ? '' : 's'}:`);
+    for (const posting of postings) {
+      printLine(context, `    ${describePosting(posting)}`);
+      printLine(context, `      ${posting.canonicalUrl ?? posting.sourceUrl}`);
     }
 
     printLine(context);

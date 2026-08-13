@@ -16,7 +16,14 @@ interface MinimalBrowser {
   close(): Promise<void>;
 }
 
+interface MinimalRoute {
+  request(): { url(): string };
+  abort(reason?: string): Promise<void>;
+  continue(): Promise<void>;
+}
+
 interface MinimalPage {
+  route(pattern: string, handler: (route: MinimalRoute) => Promise<void> | void): Promise<void>;
   goto(url: string, options?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
   content(): Promise<string>;
 }
@@ -35,6 +42,8 @@ export interface BrowserRenderOptions {
   timeoutMs?: number;
   /** Injectable for tests. */
   load?: () => Promise<PlaywrightModule>;
+  /** Shares the HTTP client's resolver so both guards behave identically. */
+  resolveHost?: (hostname: string) => Promise<string[]>;
 }
 
 /** Renders a page and returns its HTML. The URL guard applies here too. */
@@ -43,7 +52,8 @@ export async function renderWithBrowser(
   logger: Logger,
   options: BrowserRenderOptions = {},
 ): Promise<string> {
-  await assertUrlAllowed(url);
+  const guardOptions = options.resolveHost ? { resolve: options.resolveHost } : {};
+  await assertUrlAllowed(url, guardOptions);
 
   let playwright: PlaywrightModule;
   try {
@@ -59,6 +69,21 @@ export async function renderWithBrowser(
 
   try {
     const page = await browser.newPage();
+
+    // The page itself is guarded, but the page then asks the browser to fetch
+    // whatever it likes. Every subresource is re-checked, so a hostile career
+    // page cannot use Chromium to reach loopback or private addresses.
+    await page.route('**/*', async (route) => {
+      const target = route.request().url();
+      try {
+        await assertUrlAllowed(target, guardOptions);
+        await route.continue();
+      } catch {
+        logger.debug('blocked subresource request', { url: target });
+        await route.abort('blockedbyclient');
+      }
+    });
+
     await page.goto(url, { waitUntil: 'networkidle', timeout: options.timeoutMs ?? 30_000 });
     const html = await page.content();
     logger.debug('rendered page with browser', { bytes: html.length });

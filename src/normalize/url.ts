@@ -1,8 +1,13 @@
-/** Query params that identify a campaign, not a posting. */
+/**
+ * Query params that identify a campaign, not a posting.
+ *
+ * `gh_jid` is deliberately absent: on an embedded Greenhouse board it is the
+ * only thing identifying which job the page shows, so stripping it would make
+ * the posting unresolvable.
+ */
 const TRACKING_PARAMS = [
   /^utm_/i,
   /^gh_src$/i,
-  /^gh_jid$/i,
   /^lever-/i,
   /^ref$/i,
   /^source$/i,

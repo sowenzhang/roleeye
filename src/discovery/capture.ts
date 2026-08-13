@@ -30,21 +30,22 @@ interface GreenhouseRef {
 }
 
 export function parseGreenhouseUrl(url: URL): GreenhouseRef | undefined {
-  if (!url.hostname.includes('greenhouse.io')) return undefined;
+  if (!isHost(url, 'greenhouse.io')) return undefined;
 
   // boards.greenhouse.io/<board>/jobs/<id> and job-boards.greenhouse.io/<board>/jobs/<id>
-  const match = /^\/(?:embed\/job_app\?for=)?([^/]+)\/jobs\/(\d+)/.exec(url.pathname);
+  const match = /^\/([^/]+)\/jobs\/(\d+)/.exec(url.pathname);
   if (match?.[1] && match[2]) return { board: match[1], jobId: match[2] };
 
+  // Embedded boards carry both identifiers in the query string.
   const embedBoard = url.searchParams.get('for');
-  const embedId = url.searchParams.get('token') ?? url.searchParams.get('gh_jid');
-  if (embedBoard && embedId) return { board: embedBoard, jobId: embedId };
+  const embedId = url.searchParams.get('gh_jid') ?? url.searchParams.get('token');
+  if (embedBoard && embedId && /^\d+$/.test(embedId)) return { board: embedBoard, jobId: embedId };
 
   return undefined;
 }
 
 export function parseLeverUrl(url: URL): { site: string; jobId: string } | undefined {
-  if (!url.hostname.includes('lever.co')) return undefined;
+  if (!isHost(url, 'lever.co')) return undefined;
 
   const match = /^\/([^/]+)\/([0-9a-f-]{16,})/i.exec(url.pathname);
   if (match?.[1] && match[2]) return { site: match[1], jobId: match[2] };
@@ -52,11 +53,23 @@ export function parseLeverUrl(url: URL): { site: string; jobId: string } | undef
 }
 
 export function parseAshbyUrl(url: URL): { board: string; jobId: string } | undefined {
-  if (!url.hostname.includes('ashbyhq.com')) return undefined;
+  if (!isHost(url, 'ashbyhq.com')) return undefined;
 
   const match = /^\/([^/]+)\/([0-9a-f-]{16,})/i.exec(url.pathname);
   if (match?.[1] && match[2]) return { board: match[1], jobId: match[2] };
   return undefined;
+}
+
+/**
+ * Exact host or subdomain match.
+ *
+ * A substring test would accept `greenhouse.io.evil.test`, and while the URL
+ * guard still controls where requests go, the wrong matcher would send a board
+ * token to the wrong provider's API.
+ */
+function isHost(url: URL, domain: string): boolean {
+  const host = url.hostname.toLowerCase();
+  return host === domain || host.endsWith(`.${domain}`);
 }
 
 async function captureGreenhouse(ref: GreenhouseRef, options: CaptureOptions): Promise<DiscoveredJob[]> {

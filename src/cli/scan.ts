@@ -48,7 +48,8 @@ export const scanCommand: Command = {
           `  ${source.sourceName} [${source.captureMode}]: ${source.fetched} fetched, ${source.new} new, ` +
             `${source.changed} changed, ${source.reposted} reposted, ${source.unchanged} unchanged` +
             (source.outOfScope > 0 ? `, ${source.outOfScope} out of scope` : '') +
-            (source.capped > 0 ? `, ${source.capped} skipped by cap` : ''),
+            (source.closed > 0 ? `, ${source.closed} closed` : '') +
+            (source.deferred > 0 ? `, ${source.deferred} over cap` : ''),
         );
       }
 

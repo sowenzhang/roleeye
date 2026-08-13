@@ -73,6 +73,26 @@ export function descriptionFingerprint(description: string): string {
   return sha256(tokens.join(' '));
 }
 
+/**
+ * Company + title + content, without location.
+ *
+ * Used to recognise that two postings advertise the same role: the same job
+ * listed on two ATS providers, or one role opened in several locations. Location
+ * is deliberately excluded because it belongs to the posting, not the role.
+ * Requires a body — an empty description would cluster unrelated roles.
+ */
+export function computeClusterKey(input: {
+  normalizedCompanyName: string;
+  normalizedTitle: string;
+  descriptionText: string;
+}): string | undefined {
+  if (input.descriptionText.trim().length === 0) return undefined;
+
+  return sha256(
+    [input.normalizedCompanyName, input.normalizedTitle, descriptionFingerprint(input.descriptionText)].join('|'),
+  );
+}
+
 /** Exact-content hash, used to detect that a posting changed. */
 export function descriptionHash(description: string): string {
   return sha256(description.trim());
