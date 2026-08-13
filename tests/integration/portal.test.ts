@@ -1,0 +1,280 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { after, describe, it } from 'node:test';
+import { parse } from 'yaml';
+import { ConfigService } from '../../src/portal/config-service.js';
+import { createRoutes } from '../../src/portal/routes.js';
+import { renderIndex } from '../../src/portal/index-page.js';
+import { isAllowedOrigin, isLoopbackHost, startPortal } from '../../src/portal/server.js';
+import { resolvePaths } from '../../src/config/paths.js';
+import { criteriaSchema, sourcesSchema } from '../../src/config/schema.js';
+import { openDatabase } from '../../src/db/database.js';
+import { createRepositories } from '../../src/db/repositories/index.js';
+import { silentLogger } from '../../src/util/logger.js';
+
+const workspaces: string[] = [];
+
+function workspace(): string {
+  const dir = mkdtempSync(path.join(tmpdir(), 'roleeye-portal-'));
+  mkdirSync(path.join(dir, 'config'), { recursive: true });
+  workspaces.push(dir);
+  return dir;
+}
+
+after(() => {
+  for (const dir of workspaces) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Windows may still hold a handle; a temp directory is harmless.
+    }
+  }
+});
+
+describe('portal config service', () => {
+  it('returns usable defaults before any file exists', () => {
+    const service = new ConfigService(resolvePaths(workspace()));
+
+    const criteria = service.readCriteria();
+    const sources = service.readSources();
+
+    assert.equal(criteria.exists, false);
+    assert.equal(sources.exists, false);
+    assert.equal(criteria.value.decision_thresholds.apply, 78, 'the portal opens on schema defaults');
+  });
+
+  it('writes YAML the CLI loader accepts', () => {
+    const root = workspace();
+    const service = new ConfigService(resolvePaths(root));
+
+    const result = service.saveSources({
+      sources: [{ name: 'acme', type: 'greenhouse', company: 'Acme', board: 'acme' }],
+      discovery: { capture_mode: 'scoped', scope: { titles: { include: ['engineer'] } } },
+    });
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const reloaded = sourcesSchema.safeParse(parse(readFileSync(result.path, 'utf8')));
+    assert.equal(reloaded.success, true, 'what the portal writes is what the CLI reads');
+    if (!reloaded.success) return;
+    assert.equal(reloaded.data.sources[0]?.company, 'Acme');
+  });
+
+  it('refuses invalid configuration and writes nothing', () => {
+    const root = workspace();
+    const service = new ConfigService(resolvePaths(root));
+    const file = service.locations().criteria;
+
+    const result = service.saveCriteria({ weights: { career_direction: 50 } });
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.ok(result.problems.some((problem) => problem.message.includes('total 100')));
+    assert.throws(() => readFileSync(file, 'utf8'), 'a rejected save must not leave a partial file');
+  });
+
+  it('still opens a file the loader would reject', () => {
+    const root = workspace();
+    const service = new ConfigService(resolvePaths(root));
+    writeFileSync(service.locations().sources, 'sources: "not a list"\n');
+
+    const document = service.readSources();
+
+    assert.equal(document.exists, true);
+    assert.deepEqual(document.value.sources, [], 'the portal must open exactly when config is broken');
+  });
+});
+
+describe('portal security', () => {
+  it('recognises loopback hosts only', () => {
+    assert.equal(isLoopbackHost('127.0.0.1:7777'), true);
+    assert.equal(isLoopbackHost('localhost:7777'), true);
+    assert.equal(isLoopbackHost('[::1]:7777'), true);
+    assert.equal(isLoopbackHost('192.168.1.9:7777'), false);
+    assert.equal(isLoopbackHost('roleeye.example.com'), false);
+    assert.equal(isLoopbackHost(undefined), false);
+  });
+
+  it('accepts same-origin and refuses foreign origins', () => {
+    assert.equal(isAllowedOrigin(undefined, 7777), true);
+    assert.equal(isAllowedOrigin('http://127.0.0.1:7777', 7777), true);
+    assert.equal(isAllowedOrigin('http://evil.example', 7777), false);
+    assert.equal(isAllowedOrigin('http://127.0.0.1:8888', 7777), false);
+  });
+
+  it('enforces the token, the origin, and the host over real HTTP', async () => {
+    const root = workspace();
+    const service = new ConfigService(resolvePaths(root));
+
+    const portal = await startPortal({
+      port: 0,
+      logger: silentLogger,
+      index: renderIndex,
+      routes: createRoutes({
+        config: service,
+        logger: silentLogger,
+        loadConfig: () => {
+          throw new Error('not needed');
+        },
+        openDb: () => ({ repos: createRepositories(openDatabase({ path: ':memory:' })) }),
+      }),
+    });
+
+    try {
+      const base = `http://127.0.0.1:${portal.port}`;
+      const payload = JSON.stringify({ sources: [] });
+
+      const noToken = await fetch(`${base}/api/config/sources`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: payload,
+      });
+      assert.equal(noToken.status, 403, 'a write without the token is refused');
+
+      const foreignOrigin = await fetch(`${base}/api/config/sources`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'x-roleeye-token': portal.token, origin: 'http://evil.example' },
+        body: payload,
+      });
+      assert.equal(foreignOrigin.status, 403, 'another tab cannot drive the agent');
+
+      const reads = await fetch(`${base}/api/config`);
+      assert.equal(reads.status, 200, 'reads do not need the token');
+
+      const accepted = await fetch(`${base}/api/config/sources`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'x-roleeye-token': portal.token },
+        body: payload,
+      });
+      assert.equal(accepted.status, 200);
+
+      const page = await fetch(`${base}/`);
+      assert.equal(page.status, 200);
+      assert.match(page.headers.get('content-security-policy') ?? '', /default-src 'none'/);
+    } finally {
+      await portal.close();
+    }
+  });
+
+  it('binds loopback only', async () => {
+    const portal = await startPortal({
+      port: 0,
+      logger: silentLogger,
+      index: renderIndex,
+      routes: {},
+    });
+
+    try {
+      const address = portal.server.address();
+      assert.ok(address && typeof address === 'object');
+      assert.equal(address.address, '127.0.0.1', 'never 0.0.0.0');
+    } finally {
+      await portal.close();
+    }
+  });
+});
+
+describe('portal page', () => {
+  it('renders without a bundler and escapes third-party text at runtime', () => {
+    const html = renderIndex();
+
+    assert.match(html, /<title>RoleEye<\/title>/);
+    assert.match(html, /id="boardEntry"/);
+    // Job titles and company names are inserted as text nodes, never as markup.
+    assert.match(html, /textContent = String/);
+    assert.ok(!/innerHTML\s*=/.test(html), 'innerHTML must not be used on third-party text');
+  });
+});
+
+describe('portal routes', () => {
+  function harness() {
+    const root = workspace();
+    const service = new ConfigService(resolvePaths(root));
+    const db = openDatabase({ path: ':memory:' });
+
+    return {
+      root,
+      service,
+      routes: createRoutes({
+        config: service,
+        logger: silentLogger,
+        loadConfig: () => {
+          throw new Error('not needed for this route');
+        },
+        openDb: () => ({ repos: createRepositories(db) }),
+      }),
+    };
+  }
+
+  it('reports status on an empty install', async () => {
+    const { routes } = harness();
+    const result = await routes['GET /api/status']?.({
+      method: 'GET',
+      pathname: '/api/status',
+      query: new URLSearchParams(),
+      body: undefined,
+      logger: silentLogger,
+    });
+
+    assert.equal(result?.status, 200);
+    const json = result?.json as { jobs: number; configured: boolean };
+    assert.equal(json.jobs, 0);
+    assert.equal(json.configured, false);
+  });
+
+  it('returns field-level problems rather than a generic failure', async () => {
+    const { routes } = harness();
+    const result = await routes['PUT /api/config/criteria']?.({
+      method: 'PUT',
+      pathname: '/api/config/criteria',
+      query: new URLSearchParams(),
+      body: { decision_thresholds: { apply: 10, maybe: 90 } },
+      logger: silentLogger,
+    });
+
+    assert.equal(result?.status, 400);
+    const json = result?.json as { problems: Array<{ path: string; message: string }> };
+    assert.ok(json.problems.length > 0);
+    assert.ok(json.problems[0]?.path.includes('decision_thresholds'));
+  });
+
+  it('previews scope from unsaved edits without writing them', async () => {
+    const { routes, service } = harness();
+
+    const result = await routes['POST /api/scope-preview']?.({
+      method: 'POST',
+      pathname: '/api/scope-preview',
+      query: new URLSearchParams(),
+      body: { sources: { discovery: { capture_mode: 'scoped', scope: { titles: { include: ['engineer'] } } } } },
+      logger: silentLogger,
+    });
+
+    assert.equal(result?.status, 200);
+    assert.equal(service.readSources().exists, false, 'previewing must not save');
+  });
+
+  it('rejects an invalid preview payload with problems', async () => {
+    const { routes } = harness();
+
+    const result = await routes['POST /api/scope-preview']?.({
+      method: 'POST',
+      pathname: '/api/scope-preview',
+      query: new URLSearchParams(),
+      body: { sources: { sources: 'not-a-list' } },
+      logger: silentLogger,
+    });
+
+    assert.equal(result?.status, 400);
+  });
+});
+
+describe('generated criteria', () => {
+  it('round-trips through the schema unchanged', () => {
+    const base = criteriaSchema.parse({});
+    const again = criteriaSchema.parse(base);
+    assert.deepEqual(again, base, 'saving an untouched config must not drift');
+  });
+});

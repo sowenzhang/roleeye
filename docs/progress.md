@@ -11,12 +11,13 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2 | Lever, Ashby, career pages, discovery scope config, capture modes, `add`, `scope test` | done |
 | 2.5 | Cross-model review; source/job separation (migration 003), closure lifecycle, bug fixes | done |
 | 3a | Criteria engine, hard filters, authenticity screening, backup, scheduling, interactive init | done |
-| 3b | Requirement extraction, reasoning provider, evaluation, cache, spend accounting, `evaluate` + `recommend` | not started |
+| 3c | Configuration portal (`roleeye ui`) | done |
+| 3b | Requirement extraction, reasoning provider, evaluation, cache, spend accounting, `evaluate` + `recommend` | in progress |
 | 3.5 | Notifier, daily digest | not started |
 | 4 | Fact store, `.docx`/`.pdf` import as draft facts, tailored resume, claim validation, resume diff, `.docx` output | not started |
 | 5 | Application tracking, state history, notes, recommendation overrides | not started |
 | 6 | SQL search, FTS5, funnel + segment analytics, `stats` | not started |
-| 6.5 | Local portal | not started |
+| 6.5 | Review portal: queue, application timeline, analytics | not started |
 | 7 | Career memory / local RAG | speculative |
 | 8 | Learning loop | speculative |
 | — | VPS sync and private job site | deferred, not planned |
@@ -49,6 +50,33 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-13 | Evaluations reference a snapshot, a content hash, and profile/criteria hashes. | Without them a verdict cannot be attributed to the body that produced it, cannot be marked stale after an edit, and the documented cache key cannot be implemented. |
 | 2026-08-13 | Postings close only after a source run succeeds, and a role closes only when every posting closes. | `closed_at` was previously never set at all. A failed fetch must never retire live roles (architecture.md §30). |
 | 2026-08-13 | The per-scan cap defers unseen roles instead of truncating the fetch. | Truncating stopped refreshing known roles — which would eventually close live jobs — and could hide the same role forever if it sat past the cap in the provider's ordering. |
+
+## Phase 3c notes
+
+The portal was pulled forward from 6.5 after user feedback: hand-writing YAML was
+blocking real use. The earlier "defer the portal" argument was about managing
+*state*, which is still true — so the portal was split. Configuration editing
+ships now; the review queue, application timeline, and analytics stay at 6.5
+where the state they display will exist.
+
+- `roleeye ui` binds `127.0.0.1` only, mints a token at start, and refuses
+  cross-origin writes. Verified in a real browser: a cross-origin `PUT` gets 403.
+- The web layer holds no rules. It reads and writes the same YAML through the
+  same zod schemas the CLI loader uses, so the two cannot disagree.
+- An invalid save returns per-field problems and writes nothing.
+- The portal opens even when a config file on disk is broken, which is exactly
+  when someone needs it.
+- Board lookup checks a pasted careers URL against the live adapter through the
+  URL guard, so nobody has to know what an ATS board token is. Adding Airtable
+  reported "19 open roles right now".
+- No bundler and no framework: `node:http` plus one embedded page module, so
+  `tsc` remains the only build step and the whole UI is auditable in one file.
+- All third-party text is inserted as text nodes; `innerHTML` is never used on
+  it, and a test asserts that.
+
+Verified end to end from a clean install: portal wrote both files → `doctor`
+passed → `scan` fetched 19 roles and stored 1 in scope → `screen` marked it
+eligible → reopening the portal showed the persisted settings and live counts.
 
 ## Phase 3a notes
 

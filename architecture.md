@@ -1503,7 +1503,8 @@ returns concise APPLY/MAYBE/SKIP results.
 
 ## Phase 3.5 — Notifications
 
-Scheduling ships in 3a, so the unattended loop only needs a way to reach the user.
+Scheduling ships in 3a and configuration moved to its own phase, so the
+unattended loop only needs a way to reach the user.
 
 Build:
 
@@ -1515,9 +1516,29 @@ Acceptance:
 - a scheduled scan can notify without a terminal attached
 - every notification links to the underlying local record
 
-The local portal moved to its own phase after application tracking exists. A
-portal over recommendations alone would surface a list the CLI already prints;
-it becomes worth building once there is application state to manage.
+---
+
+## Phase 3c — Configuration Portal
+
+Brought forward from 6.5 on user feedback: YAML is a good storage format and a
+poor authoring format, and hand-writing it was blocking real use. Scoped to
+configuration only — the review queue still waits until there is application
+state to manage.
+
+Build:
+
+- `roleeye ui`: a localhost-only server over the existing modules
+- forms for sources, scope, hard filters, and screening
+- board lookup that verifies a pasted careers URL against the live adapter
+- read-only scope preview, identical to `roleeye scope test`
+
+Acceptance:
+
+- the portal writes the same YAML the CLI reads, through the same schemas
+- invalid input is rejected per field and nothing is written
+- no business logic exists in the web layer
+- the server binds to `127.0.0.1` only and refuses cross-origin writes
+- posting-derived text renders as text, never as markup
 
 ---
 
@@ -1582,17 +1603,15 @@ Acceptance:
 
 ---
 
-## Phase 6.5 — Local Portal
+## Phase 6.5 — Review Portal
 
-Deferred until here deliberately. A portal over recommendations alone shows a
-list the CLI already prints; it earns its keep once there is application state,
-history, and analytics to manage.
+Extends the configuration portal from 3c once there is state worth managing.
 
 Build:
 
-- `roleeye ui`: a localhost-only server over the existing core
-- configuration editing through the same schemas the CLI validates
-- review queue, job history, application timeline, spend
+- review queue with evaluation reasoning and authenticity signals
+- job history and application timeline
+- analytics and spend views
 
 Acceptance:
 

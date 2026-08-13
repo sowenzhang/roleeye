@@ -17,13 +17,15 @@ the technical design and implementation phases.
 
 ## Status
 
-**Phases 0, 1, 2, 2.5, and 3a are implemented.**
+**Phases 0, 1, 2, 2.5, 3a, and 3c are implemented.**
 
 RoleEye currently runs a complete deterministic loop with no model and no spend:
 discover roles, keep permanent history, filter them against your rules, screen
-them for scams, and run itself on a schedule.
+them for scams, and run itself on a schedule. Configure it in a browser or in a
+terminal — both write the same files.
 
-- `roleeye init --interactive` — answer a few questions, get working config
+- `roleeye ui` — local configuration portal on `127.0.0.1`
+- `roleeye init --interactive` — the same setup as a terminal interview
 - `roleeye doctor` — validate config, database, migrations, adapters
 - `roleeye scan` — fetch Greenhouse, Lever, Ashby, and career pages
 - `roleeye add <url>` — capture a single posting the sources do not reach
@@ -35,8 +37,8 @@ them for scams, and run itself on a schedule.
 - `roleeye backup` — snapshot the authoritative database
 
 Not implemented yet: LLM evaluation, resume tailoring, application tracking,
-search, analytics, and the local portal. Those commands exit with a usage error
-naming the phase that will deliver them. See [`docs/progress.md`](./docs/progress.md).
+search, and analytics. Those commands exit with a usage error naming the phase
+that will deliver them. See [`docs/progress.md`](./docs/progress.md).
 
 ## Layout
 
@@ -74,12 +76,15 @@ Requires Node.js 22+.
 npm install
 npm run build
 
-node dist/index.js init --interactive   # a few questions, then you are configured
-node dist/index.js scan                 # fetch the boards you listed
-node dist/index.js screen               # filter them against your rules
-node dist/index.js verify <job-id>      # see exactly why a role passed or failed
+node dist/index.js ui                     # configure in a browser, no YAML required
+node dist/index.js scan                   # real jobs from real boards
+node dist/index.js screen                 # filters + scam screening
+node dist/index.js verify <job-id>        # why it passed or failed
 node dist/index.js schedule install --at 07:30
 ```
+
+Prefer a terminal? `node dist/index.js init --interactive` asks the same
+questions. Both write the same YAML, validated the same way.
 
 Everything above is deterministic. No model is called, nothing is sent anywhere,
 and nothing is spent.
@@ -98,6 +103,7 @@ npm run roleeye -- scan --dry-run
 
 | Command | Description |
 |---|---|
+| `roleeye ui` | Local configuration portal; `--port`, `--no-open` |
 | `roleeye init` | Set up config and the database; `--interactive` asks a few questions |
 | `roleeye doctor` | Validate config, paths, database, migrations, and adapters |
 | `roleeye scan` | Fetch all enabled sources; `--source <name\|type>`, `--dry-run` |
