@@ -78,10 +78,12 @@ export const showCommand: Command = {
     printLine(context, `${job.id}`);
     printLine(context);
     printLine(context, `  Level:        ${job.level ?? 'unspecified'}`);
+    printLine(context, `  Team:         ${[job.department, job.team].filter(Boolean).join(' / ') || 'unspecified'}`);
     printLine(context, `  Location:     ${job.locationText ?? 'unspecified'}${job.country ? ` (${job.country})` : ''}`);
     printLine(context, `  Arrangement:  ${job.workArrangement}`);
     printLine(context, `  Compensation: ${formatSalary(job)}`);
     printLine(context, `  Source:       ${job.sourceType}${job.sourceName ? ` / ${job.sourceName}` : ''}`);
+    printLine(context, `  Capture:      ${job.captureMode}${job.inScope ? '' : ` (out of scope: ${job.scopeReason ?? 'unspecified'})`}`);
     printLine(context, `  Apply system: ${job.applicationSystem ?? 'unknown'}`);
     printLine(context, `  URL:          ${job.canonicalUrl ?? job.sourceUrl}`);
     printLine(context, `  First seen:   ${job.firstSeenAt}`);

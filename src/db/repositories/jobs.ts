@@ -37,12 +37,22 @@ interface JobRow {
   closed_at: string | null;
   created_at: string;
   updated_at: string;
+  department: string | null;
+  team: string | null;
+  capture_mode: string;
+  in_scope: number;
+  scope_reason: string | null;
 }
 
 export interface JobWithCompany extends Job {
   companyName: string;
   sourceName: string | undefined;
   applicationSystem: string | undefined;
+  department: string | undefined;
+  team: string | undefined;
+  captureMode: string;
+  inScope: boolean;
+  scopeReason: string | undefined;
 }
 
 function mapRow(row: JobRow & { company_name?: string }): JobWithCompany {
@@ -77,6 +87,11 @@ function mapRow(row: JobRow & { company_name?: string }): JobWithCompany {
     closedAt: fromDb(row.closed_at),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    department: fromDb(row.department),
+    team: fromDb(row.team),
+    captureMode: row.capture_mode ?? 'scoped',
+    inScope: row.in_scope !== 0,
+    scopeReason: fromDb(row.scope_reason),
   };
 }
 
@@ -90,10 +105,19 @@ export interface JobListFilters {
   titleContains?: string | undefined;
   sourceType?: string | undefined;
   country?: string | undefined;
+  department?: string | undefined;
   seenSince?: IsoTimestamp | undefined;
   includeClosed?: boolean | undefined;
+  /** Defaults to in-scope only; out-of-scope rows are history, not results. */
+  inScope?: boolean | undefined;
   limit?: number | undefined;
   offset?: number | undefined;
+}
+
+export interface CaptureContext {
+  captureMode: string;
+  inScope: boolean;
+  scopeReason: string | undefined;
 }
 
 export class JobRepository {
@@ -133,7 +157,12 @@ export class JobRepository {
     return row ? mapRow(row) : undefined;
   }
 
-  insert(normalized: NormalizedJob, companyId: string, seenAt: IsoTimestamp): JobWithCompany {
+  insert(
+    normalized: NormalizedJob,
+    companyId: string,
+    seenAt: IsoTimestamp,
+    capture: CaptureContext = { captureMode: 'scoped', inScope: true, scopeReason: undefined },
+  ): JobWithCompany {
     const id = deriveJobId(normalized.identityKey);
     const timestamp = nowIso();
 
@@ -144,13 +173,15 @@ export class JobRepository {
            location_text, country, salary_min, salary_max, salary_currency, salary_period,
            source_type, source_name, source_job_id, source_url, canonical_url, apply_url,
            application_system, identity_key, identity_tier, fingerprint, description_text,
-           description_hash, posted_at, first_seen_at, last_seen_at, closed_at, created_at, updated_at
+           description_hash, posted_at, first_seen_at, last_seen_at, closed_at, created_at, updated_at,
+           department, team, capture_mode, in_scope, scope_reason
          ) VALUES (
            @id, @company_id, @title, @normalized_title, @level, @employment_type, @work_arrangement,
            @location_text, @country, @salary_min, @salary_max, @salary_currency, @salary_period,
            @source_type, @source_name, @source_job_id, @source_url, @canonical_url, @apply_url,
            @application_system, @identity_key, @identity_tier, @fingerprint, @description_text,
-           @description_hash, @posted_at, @first_seen_at, @last_seen_at, NULL, @created_at, @updated_at
+           @description_hash, @posted_at, @first_seen_at, @last_seen_at, NULL, @created_at, @updated_at,
+           @department, @team, @capture_mode, @in_scope, @scope_reason
          )`,
       )
       .run({
@@ -184,6 +215,11 @@ export class JobRepository {
         last_seen_at: seenAt,
         created_at: timestamp,
         updated_at: timestamp,
+        department: toDb(normalized.department),
+        team: toDb(normalized.team),
+        capture_mode: capture.captureMode,
+        in_scope: capture.inScope ? 1 : 0,
+        scope_reason: toDb(capture.scopeReason),
       });
 
     const inserted = this.findById(id);
@@ -199,12 +235,27 @@ export class JobRepository {
     jobId: string,
     normalized: NormalizedJob,
     seenAt: IsoTimestamp,
-    options: { updateContent: boolean },
+    options: { updateContent: boolean } & Partial<CaptureContext>,
   ): void {
+    const scopeFields = {
+      capture_mode: options.captureMode ?? null,
+      in_scope: options.inScope === undefined ? null : options.inScope ? 1 : 0,
+      scope_reason: toDb(options.scopeReason),
+    };
+
     if (!options.updateContent) {
       this.db
-        .prepare('UPDATE jobs SET last_seen_at = ?, closed_at = NULL, updated_at = ? WHERE id = ?')
-        .run(seenAt, nowIso(), jobId);
+        .prepare(
+          `UPDATE jobs SET
+             last_seen_at = @last_seen_at,
+             closed_at = NULL,
+             updated_at = @updated_at,
+             capture_mode = COALESCE(@capture_mode, capture_mode),
+             in_scope = COALESCE(@in_scope, in_scope),
+             scope_reason = @scope_reason
+           WHERE id = @id`,
+        )
+        .run({ id: jobId, last_seen_at: seenAt, updated_at: nowIso(), ...scopeFields });
       return;
     }
 
@@ -230,6 +281,11 @@ export class JobRepository {
            fingerprint = @fingerprint,
            description_text = @description_text,
            description_hash = @description_hash,
+           department = COALESCE(@department, department),
+           team = COALESCE(@team, team),
+           capture_mode = COALESCE(@capture_mode, capture_mode),
+           in_scope = COALESCE(@in_scope, in_scope),
+           scope_reason = @scope_reason,
            last_seen_at = @last_seen_at,
            closed_at = NULL,
            updated_at = @updated_at
@@ -258,6 +314,9 @@ export class JobRepository {
         description_hash: normalized.descriptionHash,
         last_seen_at: seenAt,
         updated_at: nowIso(),
+        department: toDb(normalized.department),
+        team: toDb(normalized.team),
+        ...scopeFields,
       });
   }
 
@@ -281,6 +340,14 @@ export class JobRepository {
     if (filters.country) {
       clauses.push('jobs.country = @country');
       params['country'] = filters.country;
+    }
+    if (filters.department) {
+      clauses.push('(LOWER(jobs.department) LIKE @department OR LOWER(jobs.team) LIKE @department)');
+      params['department'] = `%${filters.department.toLowerCase()}%`;
+    }
+    if (filters.inScope !== undefined) {
+      clauses.push('jobs.in_scope = @inScope');
+      params['inScope'] = filters.inScope ? 1 : 0;
     }
     if (filters.seenSince) {
       clauses.push('jobs.last_seen_at >= @seenSince');

@@ -140,6 +140,10 @@ export interface DiscoveredJob {
   description?: string | undefined;
   descriptionHtml?: string | undefined;
   employmentType?: EmploymentType | undefined;
+  /** Set when the source states the arrangement rather than implying it. */
+  workArrangement?: WorkArrangement | undefined;
+  department?: string | undefined;
+  team?: string | undefined;
   salary?: RawSalary | undefined;
   postedAt?: IsoTimestamp | undefined;
   rawPayload?: unknown;

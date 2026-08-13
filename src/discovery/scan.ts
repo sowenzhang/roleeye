@@ -1,5 +1,5 @@
 import type { AppConfig } from '../config/load.js';
-import type { SourceConfig } from '../config/schema.js';
+import type { CaptureMode, SourceConfig } from '../config/schema.js';
 import type { DiscoveredJob } from '../core/types.js';
 import type { Database } from '../db/database.js';
 import { withTransaction } from '../db/database.js';
@@ -10,14 +10,18 @@ import { nowIso } from '../util/time.js';
 import { createHttpClient } from './http.js';
 import { ingestJob, type IngestResult } from './ingest.js';
 import { getAdapter } from './registry.js';
+import { scopeFromConfig, evaluateScope, type EffectiveScope } from './scope.js';
+import { normalizeDiscoveredJob } from '../normalize/job.js';
 import type { HttpClient } from './source-adapter.js';
 
 export interface SourceScanSummary {
   sourceName: string;
   sourceType: string;
+  captureMode: string;
   status: 'ok' | 'failed';
   fetched: number;
-  filtered: number;
+  outOfScope: number;
+  capped: number;
   new: number;
   changed: number;
   reposted: number;
@@ -31,7 +35,7 @@ export interface ScanSummary {
   finishedAt: string;
   status: 'ok' | 'warning' | 'failed';
   sources: SourceScanSummary[];
-  totals: { fetched: number; new: number; changed: number; reposted: number; unchanged: number };
+  totals: { fetched: number; new: number; changed: number; reposted: number; unchanged: number; outOfScope: number };
 }
 
 export interface ScanOptions {
@@ -53,6 +57,21 @@ export function passesDiscoveryFilters(title: string, filters: AppConfig['source
   if (filters.title_include.length === 0) return true;
 
   return filters.title_include.some((term) => lower.includes(term.toLowerCase()));
+}
+
+export interface ResolvedSourcePlan {
+  source: SourceConfig;
+  captureMode: CaptureMode;
+  scope: EffectiveScope;
+}
+
+/** Combines global discovery settings with per-source overrides. */
+export function planSource(config: AppConfig, source: SourceConfig): ResolvedSourcePlan {
+  return {
+    source,
+    captureMode: source.capture_mode ?? config.sources.discovery.capture_mode,
+    scope: scopeFromConfig(config.sources, source.scope),
+  };
 }
 
 function selectSources(config: AppConfig, only: string[] | undefined): SourceConfig[] {
@@ -90,13 +109,16 @@ export async function runScan(options: ScanOptions): Promise<ScanSummary> {
     const adapter = getAdapter(source.type);
     const runId = options.dryRun ? undefined : repos.scans.startSourceRun(scanId, source.name, source.type);
     const sourceLogger = logger.child({ source: source.name });
+    const plan = planSource(config, source);
 
     const summary: SourceScanSummary = {
       sourceName: source.name,
       sourceType: source.type,
+      captureMode: plan.captureMode,
       status: 'ok',
       fetched: 0,
-      filtered: 0,
+      outOfScope: 0,
+      capped: 0,
       new: 0,
       changed: 0,
       reposted: 0,
@@ -125,26 +147,42 @@ export async function runScan(options: ScanOptions): Promise<ScanSummary> {
       const discovered: DiscoveredJob[] = await adapter.scan(source as never, { http, logger: sourceLogger });
       summary.fetched = discovered.length;
 
-      const kept = discovered.filter((job) => passesDiscoveryFilters(job.title, config.sources.discovery_filters));
-      summary.filtered = discovered.length - kept.length;
+      // A board that suddenly publishes hundreds of roles should warn, not
+      // silently flood the database or the evaluation queue.
+      const cap = plan.scope.maxNewPerSourcePerScan;
+      let candidates = discovered;
+      if (cap !== undefined && discovered.length > cap) {
+        candidates = discovered.slice(0, cap);
+        summary.capped = discovered.length - cap;
+        sourceLogger.warn('source exceeded its per-scan cap', {
+          fetched: discovered.length,
+          cap,
+          skipped: summary.capped,
+        });
+      }
 
       if (!options.dryRun) {
         const seenAt = nowIso();
         const results = withTransaction(db, () =>
-          kept.map((job) =>
+          candidates.map((job) =>
             ingestJob(repos, job, {
               seenAt,
               scanId,
               repostGapDays: config.sources.dedupe.repost_gap_days,
+              captureMode: plan.captureMode,
+              scope: plan.scope,
             }),
           ),
         );
         tally(summary, results);
+      } else {
+        summary.outOfScope = countOutOfScope(candidates, plan);
       }
 
       sourceLogger.info('source scanned', {
+        captureMode: plan.captureMode,
         fetched: summary.fetched,
-        filtered: summary.filtered,
+        outOfScope: summary.outOfScope,
         new: summary.new,
         changed: summary.changed,
         reposted: summary.reposted,
@@ -156,6 +194,7 @@ export async function runScan(options: ScanOptions): Promise<ScanSummary> {
           recordsSeen: summary.fetched,
           recordsNew: summary.new,
           recordsChanged: summary.changed + summary.reposted,
+          recordsOutOfScope: summary.outOfScope,
         });
       }
     } catch (error) {
@@ -197,14 +236,40 @@ export async function runScan(options: ScanOptions): Promise<ScanSummary> {
       changed: sum(summaries, 'changed'),
       reposted: sum(summaries, 'reposted'),
       unchanged: sum(summaries, 'unchanged'),
+      outOfScope: sum(summaries, 'outOfScope'),
     },
   };
 }
 
-function tally(summary: SourceScanSummary, results: IngestResult[]): void {
+/** An out-of-scope posting in `scoped` mode is skipped, so ingest returns nothing. */
+function tally(summary: SourceScanSummary, results: Array<IngestResult | undefined>): void {
   for (const result of results) {
+    if (!result) {
+      summary.outOfScope += 1;
+      continue;
+    }
+    if (!result.inScope) summary.outOfScope += 1;
     summary[result.outcome] += 1;
   }
+}
+
+function countOutOfScope(candidates: DiscoveredJob[], plan: ResolvedSourcePlan): number {
+  return candidates.filter((job) => {
+    const normalized = normalizeDiscoveredJob(job);
+    return !evaluateScope(
+      {
+        title: normalized.title,
+        level: normalized.level,
+        department: normalized.department,
+        team: normalized.team,
+        locationText: normalized.locationText,
+        country: normalized.country,
+        workArrangement: normalized.workArrangement,
+        postedAt: normalized.postedAt,
+      },
+      plan.scope,
+    ).inScope;
+  }).length;
 }
 
 function sum(summaries: SourceScanSummary[], key: keyof SourceScanSummary): number {

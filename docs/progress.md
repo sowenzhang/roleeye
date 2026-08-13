@@ -8,7 +8,7 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 0 | TypeScript project, CLI skeleton, config loader, SQLite + migrations, logging, tests, README | done |
 | 1 | Source adapter interface, Greenhouse adapter, normalize, dedupe, snapshots, source runs, `scan` + `show` | done |
 | — | Pre-Phase-2 security review and hardening | done |
-| 2 | Lever, Ashby, career pages, discovery scope config, capture modes, `add`, `scope test` | not started |
+| 2 | Lever, Ashby, career pages, discovery scope config, capture modes, `add`, `scope test` | done |
 | 3 | Criteria engine, hard filters, authenticity screening, Advocate/Skeptic/Judge, evaluation cache, spend accounting, `evaluate` + `recommend` + `verify` | not started |
 | 3.5 | Notifier, daily digest, `schedule install`, local portal (`roleeye ui`) | not started |
 | 4 | Fact store, `.docx`/`.pdf` import as draft facts, tailored resume, claim validation, resume diff, `.docx` output | not started |
@@ -37,6 +37,27 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-13 | `.docx`/`.pdf` resume import produces draft facts requiring explicit approval. | Removes the blank-page problem without weakening the rule that every generated claim traces to an approved fact. |
 | 2026-08-13 | Security review conducted before Phase 2 rather than after. | Phase 2 accepts arbitrary career-page URLs and Phase 3 puts posting text into prompts; both amplify weaknesses that are inert today. |
 | 2026-08-13 | Lockfile `resolved` URLs normalized to `registry.npmjs.org`, with `.npmrc` pinning the public registry. | The lockfile had been generated behind a corporate mirror; publishing it would delegate dependency hosting for every contributor and CI job. |
+| 2026-08-13 | A per-source scope group replaces the global group entirely rather than merging field by field. | Partial merging makes configuration hard to predict: a user who sets source-specific titles expects exactly those titles. |
+| 2026-08-13 | The career-page adapter reads only schema.org `JobPosting` data and refuses to guess from arbitrary markup. | Heuristic scraping produces silently wrong records, and a wrong record is worse than a missing one. The error names the linked ATS when it finds one. |
+| 2026-08-13 | Playwright stays an optional, dynamically imported peer rather than a dependency. | It is a large install most users never need, and architecture.md ranks browser automation last among discovery methods. |
+| 2026-08-13 | Salary parsing now requires explicit monetary evidence and plausibility bounds. | Real postings caused "$12.7B valuation" and "founded in 2015… 13 countries" to be stored as pay. Compensation feeds a Phase 3 hard filter, so a wrong number is worse than no number. |
+
+## Phase 2 notes
+
+- Adapters: Greenhouse, Lever, Ashby, and a generic career page. Lever and Ashby
+  provide structured salary ranges, which are preferred over parsing prose.
+- Capture modes (`scoped`, `full`, `history`) and scope filters are configured in
+  `config/sources.yaml`, previewable with `roleeye scope test`.
+- `roleeye add <url>` uses ATS single-posting endpoints where they exist and falls
+  back to page JSON-LD. It bypasses the scope filter deliberately: the user asked
+  for that specific role.
+- Every outbound request, including the browser fallback, passes the Phase 1 URL
+  guard.
+- Verified live across all three ATS providers: 588 postings fetched, scope
+  dropped 327, `history` mode stored 18 rows with zero bodies, and a second scan
+  reported 276 unchanged with no duplicates.
+- Salary audit over 276 live postings: 275 parsed, all plausible (annual
+  76k-440k, five genuinely hourly technician roles).
 
 ## Phase 1 notes
 

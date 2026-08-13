@@ -17,19 +17,22 @@ the technical design and implementation phases.
 
 ## Status
 
-**Phase 0 (bootstrap) and Phase 1 (discovery + history) are implemented.**
+**Phases 0, 1, and 2 are implemented.**
 
 Working today:
 
 - `roleeye init` — create local config/profile files from the committed examples
 - `roleeye doctor` — validate config, database, migrations, adapters
-- `roleeye scan` — fetch configured sources, normalize, dedupe, persist history
+- `roleeye scan` — fetch Greenhouse, Lever, Ashby, and career pages; normalize, dedupe, persist history
+- `roleeye add <url>` — capture a single posting the configured sources do not reach
+- `roleeye scope test` — preview which roles the current scope keeps and drops
 - `roleeye list` — structured SQL listing of stored jobs
 - `roleeye show` — full local record for one job, with event and snapshot history
 
-Not implemented yet: evaluation, resume tailoring, application tracking, search,
-analytics, export, and sync. Those commands exit with a usage error naming the
-phase that will deliver them. See [`docs/progress.md`](./docs/progress.md).
+Not implemented yet: evaluation, authenticity screening, resume tailoring,
+application tracking, search, analytics, portal, export, and sync. Those commands
+exit with a usage error naming the phase that will deliver them. See
+[`docs/progress.md`](./docs/progress.md).
 
 ## Layout
 
@@ -90,11 +93,35 @@ npm run roleeye -- scan --dry-run
 | `roleeye init` | Copy example config/profile files and create the database |
 | `roleeye doctor` | Validate config, paths, database, migrations, and adapters |
 | `roleeye scan` | Fetch all enabled sources; `--source <name\|type>`, `--dry-run` |
-| `roleeye list` | Filter stored jobs by company, title, source, country, date |
+| `roleeye add <url>` | Capture one posting from a URL; `--company`, `--dry-run` |
+| `roleeye scope test` | Preview what the scope filter keeps and drops, with reasons |
+| `roleeye list` | Filter stored jobs by company, title, department, source, country, date |
 | `roleeye show` | Show one job with its history, reposts, and snapshots |
 
 Every command supports `--json` for scripting and returns meaningful exit codes:
 `0` ok, `1` error, `2` usage, `3` config, `4` not found, `5` completed with warnings.
+
+## Sources and scope
+
+Supported source types: `greenhouse`, `lever`, `ashby`, and `career-page`
+(schema.org `JobPosting` data, with an optional Playwright fallback for
+JavaScript-rendered pages).
+
+A board routinely holds 50-400 postings, nearly all irrelevant to one person, so
+capture is scoped by configuration rather than exhaustive:
+
+| Capture mode | Stores | Description body | Evaluates |
+|---|---|---|---|
+| `scoped` (default) | in-scope postings only | yes | in-scope roles |
+| `full` | every posting | yes | in-scope roles |
+| `history` | every posting | metadata only | nothing |
+
+Scope filters on department, title (terms and regex), seniority level, country,
+metro, remote-only, and posting age, with per-source overrides. Preview any
+change with `roleeye scope test` before scanning — it only reads.
+
+Scope changes never delete history: a role that leaves scope stops being
+evaluated, it does not stop existing.
 
 ## Development
 

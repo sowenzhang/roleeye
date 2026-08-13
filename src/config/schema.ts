@@ -89,10 +89,62 @@ export const criteriaSchema = z
 
 export type CriteriaConfig = z.infer<typeof criteriaSchema>;
 
+/**
+ * How much of a source's board is captured.
+ *
+ * A board routinely holds 50-400 postings, nearly all irrelevant to one person.
+ * Capturing everything produces noise and cost; capturing nothing loses market
+ * history. The mode lets the user choose per source.
+ */
+export const captureModeSchema = z.enum(['full', 'history', 'scoped']);
+
+export type CaptureMode = z.infer<typeof captureModeSchema>;
+
+const stringList = z.array(z.string()).default([]);
+
+/** Scope fields, all optional so a per-source override can set just one. */
+const scopeShape = {
+  departments: z
+    .object({ include: stringList, exclude: stringList })
+    .partial()
+    .optional(),
+  titles: z
+    .object({ include: stringList, exclude: stringList, patterns: stringList })
+    .partial()
+    .optional(),
+  levels: z
+    .object({ include: stringList, exclude: stringList })
+    .partial()
+    .optional(),
+  locations: z
+    .object({
+      countries: stringList,
+      metros: stringList,
+      remote_only: z.boolean(),
+      exclude: stringList,
+    })
+    .partial()
+    .optional(),
+  posted_within_days: z.number().int().positive().optional(),
+  max_new_per_source_per_scan: z.number().int().positive().optional(),
+};
+
+export const scopeOverrideSchema = z.object(scopeShape).strict();
+
+export type ScopeOverride = z.infer<typeof scopeOverrideSchema>;
+
+export const scopeSchema = z.object(scopeShape).strict().default({});
+
+export type ScopeConfig = z.infer<typeof scopeSchema>;
+
 const baseSourceSchema = z.object({
   name: z.string().min(1),
   enabled: z.boolean().default(true),
   company: z.string().min(1),
+  /** Per-source override of the global capture mode. */
+  capture_mode: captureModeSchema.optional(),
+  /** Per-source scope overrides, merged over the global scope. */
+  scope: scopeOverrideSchema.optional(),
 });
 
 export const sourceSchema = z.discriminatedUnion('type', [
@@ -125,6 +177,13 @@ export const sourcesSchema = z
         user_agent: 'roleeye/0.1 (+local career agent)',
       }),
     sources: z.array(sourceSchema).default([]),
+    discovery: z
+      .object({
+        capture_mode: captureModeSchema.default('scoped'),
+        scope: scopeSchema,
+      })
+      .default({ capture_mode: 'scoped', scope: {} }),
+    /** Superseded by `discovery.scope.titles`; still honoured for existing configs. */
     discovery_filters: z
       .object({
         title_include: z.array(z.string()).default([]),

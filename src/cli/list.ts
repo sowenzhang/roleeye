@@ -11,19 +11,22 @@ export const listCommand: Command = {
   name: 'list',
   summary: 'List stored jobs with structured filters',
   usage:
-    'roleeye list [--company <name>] [--title <text>] [--source <type>] [--country <code>] [--since <iso-date>] [--include-closed] [--limit <n>] [--json]',
+    'roleeye list [--company <name>] [--title <text>] [--department <text>] [--source <type>] [--country <code>] [--since <iso-date>] [--include-closed] [--include-out-of-scope] [--limit <n>] [--json]',
 
   run(context: CommandContext) {
     const { repos } = context.openDb();
 
     const since = flagString(context.args, 'since');
+    const includeOutOfScope = flagBool(context.args, 'include-out-of-scope');
     const jobs = repos.jobs.list({
       company: flagString(context.args, 'company'),
       titleContains: flagString(context.args, 'title'),
       sourceType: flagString(context.args, 'source'),
       country: flagString(context.args, 'country'),
+      department: flagString(context.args, 'department'),
       seenSince: since ? new Date(since).toISOString() : undefined,
       includeClosed: flagBool(context.args, 'include-closed'),
+      inScope: includeOutOfScope ? undefined : true,
       limit: flagNumber(context.args, 'limit') ?? 50,
       offset: flagNumber(context.args, 'offset') ?? 0,
     });

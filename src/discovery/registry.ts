@@ -1,11 +1,14 @@
 import type { SourceConfig } from '../config/schema.js';
 import type { SourceType } from '../core/types.js';
 import { GreenhouseAdapter } from './greenhouse.js';
+import { LeverAdapter } from './lever.js';
+import { AshbyAdapter } from './ashby.js';
+import { CareerPageAdapter } from './career-page.js';
 import type { JobSourceAdapter } from './source-adapter.js';
 
 /**
- * Adapter registry. Later phases register lever/ashby/career-page here without
- * touching the ingestion pipeline.
+ * Adapter registry. New source types register here without touching the
+ * ingestion pipeline.
  */
 const adapters = new Map<SourceType, JobSourceAdapter<never>>();
 
@@ -22,3 +25,6 @@ export function registeredAdapterNames(): SourceType[] {
 }
 
 registerAdapter(new GreenhouseAdapter());
+registerAdapter(new LeverAdapter());
+registerAdapter(new AshbyAdapter());
+registerAdapter(new CareerPageAdapter());

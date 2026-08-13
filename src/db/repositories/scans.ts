@@ -39,6 +39,7 @@ export interface SourceRunResult {
   recordsSeen: number;
   recordsNew: number;
   recordsChanged: number;
+  recordsOutOfScope?: number | undefined;
   error?: string | undefined;
 }
 
@@ -83,6 +84,7 @@ export class ScanRepository {
            records_seen = @records_seen,
            records_new = @records_new,
            records_changed = @records_changed,
+           records_out_of_scope = @records_out_of_scope,
            error = @error
          WHERE id = @id`,
       )
@@ -93,6 +95,7 @@ export class ScanRepository {
         records_seen: result.recordsSeen,
         records_new: result.recordsNew,
         records_changed: result.recordsChanged,
+        records_out_of_scope: result.recordsOutOfScope ?? 0,
         error: toDb(result.error),
       });
   }

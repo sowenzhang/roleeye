@@ -1,8 +1,10 @@
 import { ExitCode } from '../util/errors.js';
+import { addCommand } from './add.js';
 import { doctorCommand } from './doctor.js';
 import { initCommand } from './init.js';
 import { listCommand } from './list.js';
 import { scanCommand } from './scan.js';
+import { scopeCommand } from './scope.js';
 import { showCommand } from './show.js';
 import { printLine, type Command, type CommandContext } from './command.js';
 
@@ -10,6 +12,8 @@ export const commands: readonly Command[] = [
   initCommand,
   doctorCommand,
   scanCommand,
+  addCommand,
+  scopeCommand,
   listCommand,
   showCommand,
 ];

@@ -45,9 +45,10 @@ export const scanCommand: Command = {
         }
         printLine(
           context,
-          `  ${source.sourceName}: ${source.fetched} fetched, ${source.new} new, ${source.changed} changed, ` +
-            `${source.reposted} reposted, ${source.unchanged} unchanged` +
-            (source.filtered > 0 ? `, ${source.filtered} filtered out` : ''),
+          `  ${source.sourceName} [${source.captureMode}]: ${source.fetched} fetched, ${source.new} new, ` +
+            `${source.changed} changed, ${source.reposted} reposted, ${source.unchanged} unchanged` +
+            (source.outOfScope > 0 ? `, ${source.outOfScope} out of scope` : '') +
+            (source.capped > 0 ? `, ${source.capped} skipped by cap` : ''),
         );
       }
 

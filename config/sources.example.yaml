@@ -6,6 +6,51 @@ defaults:
   max_pages: 5
   user_agent: "roleeye/0.1 (+local career agent)"
 
+# How much of each board is captured, and which roles count as relevant.
+# A board routinely holds 50-400 postings; capturing everything is noise you
+# have to read and money you have to spend. Preview with `roleeye scope test`.
+discovery:
+  # scoped  = store only in-scope roles (default)
+  # full    = store everything, flag what is in scope
+  # history = store metadata only, evaluate nothing (market history)
+  capture_mode: scoped
+
+  scope:
+    departments:
+      include: []
+      exclude:
+        - recruiting
+        - sales
+
+    titles:
+      include:
+        - engineer
+        - architect
+      exclude:
+        - intern
+        - manager
+        - director
+      patterns:
+        - "(staff|principal|senior)\\s+.*engineer"
+
+    levels:
+      include: []
+      exclude:
+        - intern
+        - junior
+
+    locations:
+      countries:
+        - US
+      metros: []
+      remote_only: false
+      exclude: []
+
+    posted_within_days: 60
+
+    # Safety valve: warn instead of ingesting hundreds of roles at once.
+    max_new_per_source_per_scan: 50
+
 sources:
   - name: example-greenhouse
     type: greenhouse
@@ -28,21 +73,33 @@ sources:
     board: example-board
     company: Example Company
 
+  # Per-source override: watch a company's market without evaluating any of it.
+  - name: example-competitor
+    type: greenhouse
+    enabled: false
+    board: competitor-board
+    company: Competitor Inc
+    capture_mode: history
+
+  # A source-level scope group replaces that group entirely, it does not merge.
+  - name: example-narrow
+    type: ashby
+    enabled: false
+    board: example-board
+    company: Example Company
+    scope:
+      titles:
+        include:
+          - platform
+
   - name: example-career-page
     type: career-page
     enabled: false
     company: Example Company
     url: https://example.com/careers
-    # Use the browser fallback only when no structured feed exists.
+    # Reads schema.org JobPosting data. Enable the browser fallback only if the
+    # page builds its listings with JavaScript, and install playwright first.
     browser_fallback: false
 
-# Optional filters applied at discovery time to limit fetch volume.
-discovery_filters:
-  title_include:
-    - engineer
-    - architect
-    - principal
-    - staff
-  title_exclude:
-    - intern
-    - sales
+dedupe:
+  repost_gap_days: 21

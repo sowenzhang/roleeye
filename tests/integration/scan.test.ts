@@ -6,6 +6,7 @@ import { beforeEach, describe, it } from 'node:test';
 import { openDatabase, type Database } from '../../src/db/database.js';
 import { createRepositories, type Repositories } from '../../src/db/repositories/index.js';
 import { runScan, passesDiscoveryFilters } from '../../src/discovery/scan.js';
+import { getAdapter } from '../../src/discovery/registry.js';
 import { criteriaSchema, sourcesSchema, syncSchema } from '../../src/config/schema.js';
 import type { AppConfig } from '../../src/config/load.js';
 import type { HttpClient } from '../../src/discovery/source-adapter.js';
@@ -119,7 +120,7 @@ describe('scan pipeline', () => {
     assert.equal(repos.jobs.count(), 3);
   });
 
-  it('applies discovery title filters', async () => {
+  it('applies scope filtering from the legacy discovery_filters block', async () => {
     const config = buildConfig({
       sources: {
         sources: [{ name: 'examplecorp', type: 'greenhouse', company: 'Example Corp', board: 'examplecorp' }],
@@ -128,8 +129,30 @@ describe('scan pipeline', () => {
     });
 
     const summary = await runScan({ config, db, repos, logger: silentLogger, http: stubHttp() });
-    assert.equal(summary.sources[0]?.filtered, 1);
-    assert.equal(repos.jobs.count(), 2);
+    assert.equal(summary.sources[0]?.outOfScope, 1);
+    assert.equal(repos.jobs.count(), 2, 'the intern posting is not stored in scoped mode');
+  });
+
+  it('registers an adapter for every configured source type', () => {
+    for (const type of ['greenhouse', 'lever', 'ashby', 'career-page'] as const) {
+      assert.ok(getAdapter(type), `${type} adapter must be registered`);
+    }
+  });
+
+  it('isolates a failing source from a healthy one', async () => {
+    const config = buildConfig({
+      sources: {
+        sources: [
+          { name: 'examplecorp', type: 'greenhouse', company: 'Example Corp', board: 'examplecorp' },
+          { name: 'later', type: 'lever', company: 'Later Corp', site: 'later' },
+        ],
+      },
+    });
+
+    const summary = await runScan({ config, db, repos, logger: silentLogger, http: stubHttp() });
+    assert.equal(summary.status, 'warning');
+    assert.equal(repos.jobs.count(), 3, 'the healthy source still persisted');
+    assert.match(summary.sources.find((entry) => entry.sourceName === 'later')?.error ?? '', /fetch failed/);
   });
 
   it('writes nothing during a dry run', async () => {
@@ -140,14 +163,42 @@ describe('scan pipeline', () => {
     assert.equal(repos.jobs.count(), 0);
   });
 
-  it('skips unregistered source types without failing the run', async () => {
+  it('caps how many new postings a single source may contribute', async () => {
     const config = buildConfig({
-      sources: { sources: [{ name: 'later', type: 'lever', company: 'Later Corp', site: 'later' }] },
+      sources: {
+        sources: [{ name: 'examplecorp', type: 'greenhouse', company: 'Example Corp', board: 'examplecorp' }],
+        discovery: { scope: { max_new_per_source_per_scan: 2 } },
+      },
     });
 
     const summary = await runScan({ config, db, repos, logger: silentLogger, http: stubHttp() });
-    assert.equal(summary.status, 'failed');
-    assert.match(summary.sources[0]?.error ?? '', /no adapter registered/);
+    assert.equal(summary.sources[0]?.capped, 1);
+    assert.equal(repos.jobs.count(), 2);
+  });
+
+  it('honours a per-source capture mode override', async () => {
+    const config = buildConfig({
+      sources: {
+        sources: [
+          {
+            name: 'examplecorp',
+            type: 'greenhouse',
+            company: 'Example Corp',
+            board: 'examplecorp',
+            capture_mode: 'history',
+          },
+        ],
+      },
+    });
+
+    await runScan({ config, db, repos, logger: silentLogger, http: stubHttp() });
+
+    const jobs = repos.jobs.list({ limit: 10, inScope: undefined });
+    assert.equal(jobs.length, 3);
+    for (const job of jobs) {
+      assert.equal(job.captureMode, 'history');
+      assert.equal(job.descriptionText, '');
+    }
   });
 });
 

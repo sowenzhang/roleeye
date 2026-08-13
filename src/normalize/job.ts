@@ -23,6 +23,8 @@ export interface NormalizedJob {
   workArrangement: WorkArrangement;
   locationText: string | undefined;
   country: string | undefined;
+  department: string | undefined;
+  team: string | undefined;
   salaryMin: number | undefined;
   salaryMax: number | undefined;
   salaryCurrency: string | undefined;
@@ -85,9 +87,12 @@ export function normalizeDiscoveredJob(discovered: DiscoveredJob): NormalizedJob
     normalizedTitle: normalizeTitle(title),
     level: extractLevel(title),
     employmentType: discovered.employmentType ?? 'unknown',
-    workArrangement: location.workArrangement,
+    // A source that states the arrangement is more reliable than our inference.
+    workArrangement: discovered.workArrangement ?? location.workArrangement,
     locationText: location.text,
     country: location.country,
+    department: discovered.department?.trim() || undefined,
+    team: discovered.team?.trim() || undefined,
     salaryMin: salary?.min,
     salaryMax: salary?.max,
     salaryCurrency: salary?.currency,

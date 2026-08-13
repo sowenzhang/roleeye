@@ -164,9 +164,68 @@ describe('salary parsing', () => {
     assert.equal(toAnnual(85, 'hour'), 176_800);
   });
 
+  it('ignores money that is not compensation', () => {
+    // These are the exact patterns that corrupted real records.
+    assert.equal(
+      parseSalary('With a recent valuation of approximately $12.7B, Shield AI develops autonomous systems.'),
+      undefined,
+    );
+    assert.equal(parseSalary('We raised $500M in our Series F round.'), undefined);
+    assert.equal(parseSalary('Our customers manage $2.3 billion in annual revenue.'), undefined);
+    assert.equal(parseSalary('You will own a $5M budget.'), undefined);
+  });
+
+  it('still reads a real pay statement in the same document', () => {
+    const description = [
+      'With a recent valuation of approximately $12.7B, we build autonomous systems.',
+      'Founded in 2015, the team has grown to 800 people.',
+      'The base salary range for this role is $190,000 - $240,000 per year.',
+    ].join('\n');
+
+    const salary = findSalaryInDescription(description);
+    assert.equal(salary?.min, 190_000);
+    assert.equal(salary?.max, 240_000);
+    assert.equal(salary?.period, 'year');
+  });
+
   it('returns undefined rather than guessing', () => {
     assert.equal(parseSalary('Competitive compensation and equity'), undefined);
     assert.equal(parseSalary(undefined), undefined);
+  });
+
+  it('ignores ordinary numbers in prose', () => {
+    // Every one of these appeared in real postings and previously parsed as pay.
+    assert.equal(parseSalary('Founded in 2015, we now serve 13 countries'), undefined);
+    assert.equal(parseSalary('5 to 8 years of experience required'), undefined);
+    assert.equal(parseSalary('You will lead a team of 10-15 engineers'), undefined);
+    assert.equal(parseSalary('Our 2024 to 2026 roadmap'), undefined);
+    assert.equal(parseSalary('Ranked 3 - 5 in the market'), undefined);
+  });
+
+  it('rejects implausible magnitudes', () => {
+    assert.equal(parseSalary('salary of $3 - $9 per year'), undefined);
+    assert.equal(parseSalary('$50,000,000 - $90,000,000 per year'), undefined);
+  });
+
+  it('still accepts real ranges without a currency symbol when pay is named', () => {
+    const salary = parseSalary('The pay range for this role is 180,000 - 210,000 USD per year.');
+    assert.equal(salary?.min, 180_000);
+    assert.equal(salary?.max, 210_000);
+  });
+
+  it('accepts k-suffixed ranges without a symbol', () => {
+    const salary = parseSalary('180k - 220k');
+    assert.equal(salary?.min, 180_000);
+  });
+
+  it('does not read an unrelated line as compensation', () => {
+    const description = [
+      'Shield AI is a venture-backed defence technology company founded in 2015.',
+      'Our international teammates receive a comprehensive total rewards package.',
+      'You will work with 3 to 5 partner teams.',
+    ].join('\n');
+
+    assert.equal(findSalaryInDescription(description), undefined);
   });
 
   it('finds a range inside a long description', () => {
