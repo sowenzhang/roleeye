@@ -38,7 +38,9 @@ describe('greenhouse adapter', () => {
     assert.equal(first.companyName, 'Example Corp');
     assert.equal(first.title, 'Principal Software Engineer, Loyalty Platform');
     assert.equal(first.location, 'Seattle, WA (Hybrid)');
-    assert.match(first.descriptionHtml ?? '', /<strong>Principal Software Engineer<\/strong>/);
+    // The adapter passes the body through still escaped; htmlToText owns decoding,
+    // so a double-escaped payload cannot skip a sanitizing pass.
+    assert.match(first.descriptionHtml ?? '', /&lt;strong&gt;Principal Software Engineer&lt;\/strong&gt;/);
   });
 
   it('skips entries without a title or url', () => {

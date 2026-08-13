@@ -165,7 +165,51 @@ Resume tailoring must not:
 
 All generated resume statements must be traceable to `accomplishments.yaml` or another approved fact source.
 
-### 7. Be skeptical, not merely enthusiastic
+### 7. Capture deliberately, not exhaustively
+
+Watching a company is not the same as evaluating every role it posts.
+
+A single ATS board routinely contains 50-400 postings, the large majority of
+which are irrelevant to one person. Ingesting everything produces noise in the
+database, noise in notifications, and unnecessary model spend.
+
+The user controls scope through configuration:
+
+- which departments, titles, levels, and locations are in scope
+- whether a source is captured in full or as metadata only
+- how much of the corpus may reach the evaluator
+
+Out-of-scope postings are still recorded when a source is in `history` capture
+mode, because market history is valuable, but they are never evaluated,
+never notified, and never sent to a model.
+
+Scope is data in `config/sources.yaml`. It is never hard-coded.
+
+### 8. Spend tokens deliberately
+
+Model spend is a real cost the user pays. Treat it as a budget, not a detail.
+
+Ordering rule: **deterministic filters first, cheap models second, frontier
+models last, and never twice for the same content.**
+
+Every LLM call must be attributable: which job, which stage, which model, how
+many tokens, what it cost. If the system cannot report what it spent, it is not
+finished.
+
+### 9. Treat every posting as untrusted input
+
+Job descriptions are written by third parties and fetched over the network. They
+are hostile input, not data we authored.
+
+Consequences:
+
+- posting text is never concatenated into a prompt as if it were instruction
+- posting text is always delimited and labeled as untrusted data
+- instructions found inside a posting are reported to the user, never obeyed
+- posting text is escaped before it reaches any UI
+- a posting can never cause a file write, a network call, or a config change
+
+### 10. Be skeptical, not merely enthusiastic
 
 The job evaluator must actively look for reasons a role may be wrong.
 
@@ -192,17 +236,138 @@ For each newly discovered role:
 2. Check whether it already exists.
 3. Record `first_seen` / update `last_seen`.
 4. Detect whether it appears to be a repost.
-5. Extract structured requirements.
-6. Evaluate hard constraints.
-7. Run Advocate analysis.
-8. Run Skeptic analysis.
-9. Run Judge analysis.
-10. Save the result.
-11. If score exceeds configured threshold:
+5. Apply the configured discovery scope. Out-of-scope roles stop here; they are
+   retained as history and cost nothing further.
+6. Evaluate hard constraints deterministically.
+7. Screen the posting for authenticity (ghost job / fraud / low-effort listing).
+   A posting judged fraudulent stops here and is reported to the user.
+8. Extract structured requirements.
+9. Run Advocate analysis.
+10. Run Skeptic analysis.
+11. Run Judge analysis.
+12. Save the result.
+13. If score exceeds configured threshold:
     - generate concise notification
     - optionally generate tailored resume
     - optionally generate likely application answers
-12. Wait for user action.
+14. Wait for user action.
+
+Steps 1-7 are deterministic and free. Only steps 8-11 may call a model, and only
+for roles that survived every cheaper filter.
+
+---
+
+# Job Authenticity Screening
+
+Not every posting represents a real, currently open job. Before spending
+reasoning effort — or the user's time — on a role, the system estimates whether
+the posting is genuine.
+
+Four verdicts:
+
+| Verdict | Meaning |
+|---|---|
+| `genuine` | No meaningful doubt about the posting |
+| `stale` | Probably a real role, but open unusually long or repeatedly reposted |
+| `ghost` | Probably not an actively hired role: evergreen pipeline, backfill placeholder, or agency listing |
+| `fraudulent` | Probably a scam or an impersonation of a real company |
+
+## Deterministic signals first
+
+Most of the signal comes from data the system already owns, and costs nothing:
+
+**Longevity and reposting** (this is why history is preserved)
+
+- continuously open beyond a configurable threshold
+- reposted repeatedly with no material content change
+- source job ID rotates while the description stays identical
+- the same title reappears on a fixed cadence
+
+**Posting quality**
+
+- description below a minimum length
+- no salary where the posting's stated jurisdiction requires pay transparency
+- the same description text appears under multiple unrelated companies
+- an identical role posted simultaneously across many locations
+
+**Fraud markers**
+
+- contact routed to a free email provider, Telegram, WhatsApp, or SMS
+- apply URL host unrelated to the company's known domain
+- any request for payment, equipment purchase, check deposit, or crypto
+- requests for government ID, bank details, or date of birth before an interview
+- compensation far outside the observed range for the title
+
+**Provenance**
+
+- the company has no known domain or careers page
+- a staffing or recruiting intermediary is posting on behalf of an unnamed client
+
+## Model use is the exception
+
+Deterministic signals decide most postings. A model is consulted only when
+signals are ambiguous, and it receives the signal summary plus a trimmed
+description — never the full corpus.
+
+## Rules
+
+- A verdict is never silently applied. The user always sees which signals fired.
+- `ghost` and `stale` reduce priority; they do not delete or hide the posting.
+- `fraudulent` stops the pipeline: no evaluation, no resume, no application
+  artifacts. The user is notified with the specific evidence.
+- The system never contacts a suspected fraudulent poster to "verify" anything.
+- Signals are recorded per job and per evaluation so accuracy can be reviewed
+  later against real outcomes.
+- Thresholds live in `config/criteria.yaml`. A user who wants to see everything
+  can turn screening off.
+
+---
+
+# Token and Cost Discipline
+
+The evaluator is the only expensive part of this system. Treat spend as a
+first-class constraint.
+
+## Ordering
+
+```text
+discovery scope filter   →  free
+hard filters             →  free
+authenticity signals     →  free
+content cache check      →  free
+triage (small model)     →  cheap
+advocate/skeptic/judge   →  expensive, few roles
+```
+
+## Required techniques
+
+**Never pay twice for the same content.** Evaluations are keyed by
+`description_hash` plus profile and criteria versions. An unchanged posting seen
+again, or a repost with identical content, reuses the stored evaluation.
+
+**Trim before sending.** Roughly 40-45% of a typical posting is boilerplate:
+benefits, EEO statements, privacy language, and company marketing. Strip it, and
+send the sections that describe the actual role.
+
+**Escalate, do not broadcast.** A small model triages; only roles near or above
+the decision threshold receive the full three-perspective treatment.
+
+**Budget explicitly.** Configuration sets a per-scan job cap and a spend ceiling.
+When a budget is exhausted the run stops cleanly, reports what remains, and
+leaves the rest queued — it never silently continues spending.
+
+**Account for everything.** Every call records stage, model, input tokens,
+output tokens, estimated cost, and cache status. `roleeye stats --cost` reports
+it. Providers billed per request rather than per token record request counts
+instead.
+
+## Prohibited
+
+- sending a full description to a frontier model to answer a yes/no question
+- re-evaluating unchanged postings on every scan
+- evaluating roles the user's own configuration excluded
+- silently upgrading to a more expensive model
+- hiding spend from the user
 
 ---
 
@@ -344,6 +509,35 @@ Initial ATS adapters should target:
 - Ashby
 
 Add other sources behind the same adapter interface.
+
+## Capture modes
+
+Each source declares how much of its board matters to the user:
+
+| Mode | Stores | Evaluates | Use when |
+|---|---|---|---|
+| `full` | every posting in scope, with description | in-scope roles | a company you are actively targeting |
+| `history` | every posting, metadata only | nothing | a company you want market history for |
+| `scoped` | only postings matching the scope filter | in-scope roles | large boards with one relevant team |
+
+Default is `scoped`. It keeps the database useful without turning a 400-role
+board into 400 evaluations.
+
+## Scope filters
+
+Scope is expressed once at the top level and may be overridden per source:
+
+- department and team
+- title include / exclude terms and patterns
+- seniority levels to keep or drop
+- countries, metros, and remote-only
+- posted or first-seen within N days
+- a maximum number of new in-scope roles per source per scan
+
+A scope filter is a deterministic pre-check. It runs before dedupe storage
+decisions, before hard filters, and long before any model call.
+
+## Prohibitions
 
 Do not:
 
@@ -675,6 +869,20 @@ roleeye export --private
 roleeye export --public
 roleeye sync
 roleeye doctor
+```
+
+Added by the scope, authenticity, cost, and portal decisions:
+
+```bash
+roleeye add <url>                  # capture a posting the adapters cannot reach
+roleeye scope test                 # preview what the scope filter keeps and drops
+roleeye verify <job-id>            # authenticity signals and verdict for one job
+roleeye profile import <file>      # import an existing .docx / .pdf resume as draft facts
+roleeye facts approve <fact-id>    # promote a draft fact into the approved store
+roleeye stats --cost               # model spend by day, stage, and model
+roleeye budget                     # show and set spend limits
+roleeye ui                         # local portal on 127.0.0.1
+roleeye schedule install|remove    # register the daily job with the OS scheduler
 ```
 
 Commands should be scriptable and have non-interactive modes.

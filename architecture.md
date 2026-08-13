@@ -1423,7 +1423,7 @@ Acceptance:
 
 ---
 
-## Phase 2 — More Sources
+## Phase 2 — More Sources + Discovery Scope
 
 Add:
 
@@ -1431,28 +1431,40 @@ Add:
 - Ashby
 - generic career page support
 - optional Playwright fallback
+- discovery scope configuration (§36)
+- capture modes: `full`, `history`, `scoped`
+- `roleeye add <url>` for postings no adapter reaches
+- `roleeye scope test`
 
 Acceptance:
 
 - source failure does not stop entire scan
 - duplicates across sources are handled conservatively
+- a 400-role board yields only in-scope roles for evaluation, while remaining
+  fully queryable as market history
+- changing scope never rewrites or deletes previously captured history
 
 ---
 
-## Phase 3 — Evaluation
+## Phase 3 — Evaluation + Authenticity + Cost Control
 
 Build:
 
 - career profile loader
 - criteria engine
 - hard filters
+- authenticity screening (§37)
+- evaluation cache keyed by content and config version (§38)
 - requirement extraction
 - Advocate
 - Skeptic
 - Judge
 - evaluation persistence
+- model spend accounting and budget enforcement
 - `evaluate`
 - `recommend`
+- `verify`
+- `stats --cost`
 
 Acceptance:
 
@@ -1462,6 +1474,36 @@ roleeye recommend
 
 returns concise APPLY/MAYBE/SKIP results.
 
+- an unchanged posting is never evaluated twice
+- a posting failing a deterministic filter never reaches a model
+- every model call is recorded with stage, model, tokens, and estimated cost
+- an exhausted budget stops the run cleanly and reports what remains queued
+- a `fraudulent` verdict blocks evaluation and artifact generation
+
+---
+
+## Phase 3.5 — Local Portal, Notifications, Scheduling
+
+The CLI proves the workflow; the portal makes it liveable. This phase adds no
+new business logic — it exposes existing modules.
+
+Build:
+
+- `Notifier` interface with terminal, desktop, and webhook adapters
+- daily digest generation
+- `roleeye schedule install` for Task Scheduler and cron
+- `roleeye ui`: a localhost-only server over the existing core
+- portal screens: configuration editing, review queue, job history, spend
+
+Acceptance:
+
+- the portal writes the same YAML files the CLI reads, through the same schemas
+- no business logic exists in the web layer
+- the server binds to `127.0.0.1` only and refuses non-local origins
+- posting text renders escaped; a posting containing markup or instructions
+  cannot alter the page or the agent's behavior
+- every notification links to the underlying local record
+
 ---
 
 ## Phase 4 — Resume + Application Artifacts
@@ -1469,16 +1511,20 @@ returns concise APPLY/MAYBE/SKIP results.
 Build:
 
 - accomplishment fact store
+- `.docx` / `.pdf` resume import producing **draft, unapproved** facts
+- explicit fact approval before any generated use
 - fact-to-requirement matching
 - tailored Markdown resume
 - claim validation
 - resume diff
 - application-answer drafts
+- `.docx` rendering of the tailored resume
 
 Acceptance:
 
 - every changed factual claim maps to approved fact IDs
 - no unsupported claim can pass validation
+- an imported fact cannot be used until a human approves it
 
 ---
 
@@ -1708,3 +1754,268 @@ The durable value of RoleEye comes from:
 - measurable outcomes
 
 not from maximizing autonomy.
+
+
+---
+
+# 36. Discovery Scope Configuration
+
+A single ATS board commonly holds 50-400 postings. Measured across three real
+public boards (227 postings), a typical description is ~1,500 tokens. Ingesting
+and evaluating everything is both noisy and expensive, so scope is explicit
+user configuration rather than an implicit "capture all" default.
+
+## Capture modes
+
+| Mode | Stores | Description body | Evaluates |
+|---|---|---|---|
+| `full` | every posting | yes | in-scope roles |
+| `history` | every posting | metadata only | nothing |
+| `scoped` | in-scope postings only | yes | in-scope roles |
+
+`scoped` is the default. `history` exists because market history has value even
+for roles the user will never apply to, and it costs almost nothing to keep.
+
+## Configuration shape
+
+```yaml
+discovery:
+  capture_mode: scoped
+
+  scope:
+    departments:
+      include: [engineering, product]
+      exclude: [sales, recruiting]
+
+    titles:
+      include: [engineer, architect]
+      exclude: [intern, manager, director]
+      patterns: ["(staff|principal|senior).*engineer"]
+
+    levels:
+      include: [senior, staff, senior-staff, principal]
+      exclude: [intern, junior, director, vp]
+
+    locations:
+      countries: [US]
+      remote_only: false
+      metros: [seattle, "san francisco", "new york"]
+
+    posted_within_days: 45
+    max_new_per_source_per_scan: 50
+
+sources:
+  - name: bigcorp
+    type: greenhouse
+    board: bigcorp
+    company: BigCorp
+    capture_mode: history      # per-source override
+    scope:
+      titles:
+        include: [platform]    # merges over the global scope
+```
+
+## Rules
+
+- Scope filtering is deterministic and runs before hard filters and before any
+  model call.
+- Scope changes must never delete or rewrite previously captured history. A role
+  that leaves scope stops being evaluated; it does not stop existing.
+- `roleeye scope test` previews what the current configuration keeps and drops,
+  against real stored data, without writing anything.
+- `max_new_per_source_per_scan` is a safety valve against a board that suddenly
+  publishes hundreds of roles; exceeding it warns rather than failing.
+
+---
+
+# 37. Job Authenticity Screening
+
+A posting can be real, stale, an evergreen "ghost" listing, or an outright scam.
+Screening runs after hard filters and before requirement extraction, so a
+worthless posting never reaches an expensive model.
+
+```mermaid
+flowchart LR
+    A[Normalized job] --> B[Scope filter]
+    B --> C[Hard filters]
+    C --> D[Deterministic authenticity signals]
+    D --> E{Confident?}
+    E -- yes --> F[Verdict]
+    E -- no --> G[Small-model adjudication]
+    G --> F
+    F --> H{Fraudulent?}
+    H -- yes --> I[Stop. Notify with evidence.]
+    H -- no --> J[Evaluation pipeline]
+```
+
+## Signal sources
+
+The longitudinal database is the differentiating input here: repost cadence and
+posting longevity are only visible to a system that never deletes history.
+
+| Family | Example signals | Data source |
+|---|---|---|
+| Longevity | open beyond threshold; repeated reposts with unchanged content; rotating source IDs | `job_seen_events`, `job_snapshots` |
+| Quality | description below minimum length; missing salary in a pay-transparency jurisdiction; boilerplate-only body | normalized job |
+| Duplication | identical description across unrelated companies; one title posted across many locations at once | `fingerprint` index |
+| Fraud | free-email or messaging-app contact; apply host unrelated to company domain; requests for payment, ID, or bank details | description scan |
+| Provenance | no known company domain or careers page; unnamed-client agency listing | `companies` |
+
+## Persistence
+
+```text
+job_authenticity
+id
+job_id
+evaluated_at
+verdict            # genuine | stale | ghost | fraudulent
+confidence
+signals_json       # every signal that fired, with its evidence
+method             # deterministic | model-assisted
+model              # null when deterministic
+```
+
+Verdicts are versioned like evaluations, never overwritten, so screening
+accuracy can later be measured against real outcomes.
+
+## Rules
+
+- Signals are always shown; a verdict is never an unexplained label.
+- `stale` and `ghost` reduce priority only. Nothing is hidden or deleted.
+- `fraudulent` halts the pipeline: no evaluation, no resume, no artifacts.
+- Screening is configurable and can be disabled entirely.
+- The system never contacts a suspected fraudulent poster.
+
+---
+
+# 38. Token and Cost Model
+
+## Measured inputs
+
+From 227 real postings across three public Greenhouse boards
+(`scripts/measure-corpus.ts` reproduces this):
+
+| Metric | Value |
+|---|---|
+| Median description | 1,532 tokens |
+| Mean description | 1,520 tokens |
+| p90 description | 1,883 tokens |
+| p99 description | 2,145 tokens |
+| Estimated boilerplate share | ~44% |
+
+## The cost of doing it naively
+
+Thirty boards averaging 80 postings is ~2,400 postings. A four-call evaluation
+(extract, advocate, skeptic, judge) carrying profile plus full description costs
+roughly 10,800 input and 1,500 output tokens per role — about 26M input tokens
+for a first full pass, repeated every scan if nothing is cached.
+
+## The pipeline that avoids it
+
+| Stage | Cost | Effect on the corpus |
+|---|---|---|
+| Discovery scope | free | 2,400 → ~200 |
+| Hard filters | free | ~200 → ~120 |
+| Authenticity signals | free | removes ghosts and scams |
+| Cache by `description_hash` + profile/criteria version | free | steady-state scans approach zero |
+| Boilerplate stripping | free | ~1,500 → ~850 tokens per description |
+| Triage on a small model | cheap | ~120 → ~25 |
+| Advocate / Skeptic / Judge | expensive | ~25 roles |
+
+Two orders of magnitude separate these paths. The savings come from filtering
+and caching, not from degrading the analysis of roles that matter.
+
+## Accounting
+
+```text
+llm_calls
+id
+job_id
+evaluation_id
+stage              # triage | authenticity | extract | advocate | skeptic | judge | resume | ask
+provider
+model
+input_tokens
+output_tokens
+estimated_cost_usd
+request_count      # for per-request billing such as Copilot CLI
+cache_hit
+created_at
+```
+
+Pricing lives in configuration, never in code:
+
+```yaml
+budget:
+  max_jobs_per_scan: 40
+  max_cost_per_scan_usd: 1.00
+  max_cost_per_month_usd: 20.00
+  on_exhausted: stop        # stop | warn
+
+models:
+  triage:    { provider: openai, model: gpt-5-mini,  input_per_mtok: 0.25, output_per_mtok: 2.00 }
+  reasoning: { provider: openai, model: gpt-5,       input_per_mtok: 1.25, output_per_mtok: 10.00 }
+```
+
+Providers billed per request rather than per token record `request_count` and
+leave cost null. `roleeye stats --cost` reports spend by day, stage, and model.
+
+## Rules
+
+- A budget is a hard stop, not a warning. Remaining work stays queued.
+- No stage may silently escalate to a more expensive model.
+- Cache keys include the profile and criteria versions, so changing preferences
+  correctly invalidates prior evaluations.
+
+---
+
+# 39. Local Portal
+
+The CLI remains the engine. The portal is a local client over the same modules.
+
+```mermaid
+flowchart LR
+    UI[Browser on 127.0.0.1] --> API[Local HTTP server]
+    API --> CORE[Same core modules the CLI uses]
+    CORE --> DB[(Local SQLite)]
+    CORE --> YAML[config/*.yaml and profile/*]
+```
+
+## Scope
+
+- edit configuration and preferences through validated forms, writing the same
+  YAML the CLI reads
+- review queue: recommendations with Advocate / Skeptic / Judge reasoning,
+  authenticity signals, and Apply / Skip decisions
+- history: every job ever seen, with reposts, snapshots, and application timeline
+- reports: funnel analytics, outcomes, and model spend
+- notification inbox and schedule management
+- fact approval for imported resume facts
+
+## Constraints
+
+- Binds to `127.0.0.1` only. Never `0.0.0.0`.
+- No business logic in the web layer. It calls the same functions the CLI calls.
+- All posting-derived text is escaped on output. Postings are hostile input.
+- State-changing endpoints require a token minted at server start and verify the
+  request origin, so a page in another tab cannot drive the agent.
+- The portal is optional. Every action it offers exists as a CLI command.
+
+---
+
+# 40. Untrusted Content Handling
+
+Job descriptions are attacker-influenced input. They flow into the database,
+into prompts, into artifacts, and into the portal.
+
+| Boundary | Requirement |
+|---|---|
+| Parsing | bounded response sizes; bounded description length; no unbounded backtracking in parsing regexes |
+| Storage | stored as text, never executed or interpolated into SQL |
+| Prompting | delimited and labeled as untrusted data; instructions inside a posting are reported, never obeyed |
+| Model output | schema-validated before persistence; never trusted to name a file path or command |
+| UI | escaped on output; links rendered with the destination host visible |
+| Export | sanitized through the allow-list, never republished verbatim in public mode |
+
+A posting must never be able to cause a file write, a network request, a
+configuration change, or an application submission.

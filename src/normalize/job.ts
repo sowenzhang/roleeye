@@ -9,7 +9,7 @@ import { normalizeCompanyName } from './company.js';
 import { computeFingerprint, descriptionHash, resolveIdentity, type IdentityTier } from './identity.js';
 import { normalizeLocation } from './location.js';
 import { findSalaryInDescription, parseSalary } from './salary.js';
-import { htmlToText, looksLikeHtml, normalizeWhitespace } from './text.js';
+import { htmlToText, looksLikeHtml, normalizeWhitespace, normalizeInlineText, capDescription } from './text.js';
 import { extractLevel, normalizeTitle } from './title.js';
 import { canonicalizeUrl, detectApplicationSystem } from './url.js';
 
@@ -48,12 +48,15 @@ export interface NormalizedJob {
  * stores. Pure and deterministic so it can be unit tested against fixtures.
  */
 export function normalizeDiscoveredJob(discovered: DiscoveredJob): NormalizedJob {
-  const companyName = discovered.companyName.trim();
+  const companyName = normalizeInlineText(discovered.companyName);
   const normalizedCompanyName = normalizeCompanyName(companyName);
-  const title = discovered.title.replace(/\s+/g, ' ').trim();
+  const title = normalizeInlineText(discovered.title);
 
   const descriptionText = extractDescription(discovered);
-  const location = normalizeLocation(discovered.location, descriptionText);
+  const location = normalizeLocation(
+    discovered.location === undefined ? undefined : normalizeInlineText(discovered.location),
+    descriptionText,
+  );
 
   const canonicalUrl = canonicalizeUrl(discovered.url);
   const applyUrl = canonicalizeUrl(discovered.applyUrl) ?? canonicalUrl;
@@ -108,12 +111,12 @@ export function normalizeDiscoveredJob(discovered: DiscoveredJob): NormalizedJob
 
 function extractDescription(discovered: DiscoveredJob): string {
   const html = discovered.descriptionHtml?.trim();
-  if (html) return htmlToText(html);
+  if (html) return capDescription(htmlToText(html));
 
   const plain = discovered.description?.trim();
   if (!plain) return '';
 
-  return looksLikeHtml(plain) ? htmlToText(plain) : normalizeWhitespace(plain);
+  return capDescription(looksLikeHtml(plain) ? htmlToText(plain) : normalizeWhitespace(plain));
 }
 
 function normalizeSalary(salary: DiscoveredJob['salary']): DiscoveredJob['salary'] | undefined {

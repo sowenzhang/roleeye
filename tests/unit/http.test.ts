@@ -18,6 +18,8 @@ function client(fetchImpl: typeof fetch, maxRetries = 2) {
     maxRetries,
     logger: silentLogger,
     fetchImpl,
+    // Stubbed so the suite never touches DNS or the network.
+    resolveHost: async () => ['93.184.216.34'],
   });
 }
 

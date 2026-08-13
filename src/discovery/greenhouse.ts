@@ -1,7 +1,7 @@
 import type { DiscoveredJob } from '../core/types.js';
 import { SourceError } from '../util/errors.js';
 import { toIso } from '../util/time.js';
-import { decodeHtmlEntities } from '../normalize/text.js';
+import { normalizeInlineText } from '../normalize/text.js';
 import type { AdapterContext, JobSourceAdapter } from './source-adapter.js';
 import type { SourceConfig } from '../config/schema.js';
 
@@ -32,24 +32,25 @@ export function boardUrl(board: string): string {
 }
 
 function locationOf(job: GreenhouseJob): string | undefined {
-  const primary = job.location?.name?.trim();
+  const primary = normalizeInlineText(job.location?.name ?? '');
   if (primary) return primary;
 
   const offices = (job.offices ?? [])
-    .map((office) => office?.name?.trim() ?? office?.location?.trim())
-    .filter((value): value is string => Boolean(value) && value !== 'No Office');
+    .map((office) => normalizeInlineText(office?.name ?? office?.location ?? ''))
+    .filter((value) => value.length > 0 && value !== 'No Office');
 
   return offices.length > 0 ? offices.join(' / ') : undefined;
 }
 
 /**
- * Greenhouse returns the posting body as HTML-escaped HTML, so it must be
- * unescaped once before the normalizer converts markup to text.
+ * Greenhouse returns the posting body as HTML-escaped HTML. It is handed to the
+ * normalizer still escaped: `htmlToText` alternates stripping and decoding, so
+ * decoding here first would give a double-escaped payload a free pass.
  */
 function descriptionOf(job: GreenhouseJob): string | undefined {
   const content = job.content?.trim();
   if (!content) return undefined;
-  return decodeHtmlEntities(content);
+  return content;
 }
 
 /** Pure mapping from an API payload to adapter output, so fixtures can test it offline. */
@@ -60,7 +61,7 @@ export function parseGreenhouseBoard(
   const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
 
   return jobs.flatMap((job): DiscoveredJob[] => {
-    const title = job.title?.replace(/\s+/g, ' ').trim();
+    const title = normalizeInlineText(job.title ?? '');
     const url = job.absolute_url?.trim();
     if (!title || !url) return [];
 

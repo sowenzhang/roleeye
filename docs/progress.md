@@ -5,12 +5,14 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | Phase | Scope | Status |
 |---|---|---|
 | — | Repository skeleton | done |
-| 0 | TypeScript project, CLI skeleton, config loader, SQLite + migrations, logging, tests, README | not started |
-| 1 | Source adapter interface, Greenhouse adapter, normalize, dedupe, snapshots, source runs, `scan` + `show` | not started |
-| 2 | Lever, Ashby, generic career pages, optional Playwright fallback | not started |
-| 3 | Profile/criteria engine, hard filters, requirement extraction, Advocate/Skeptic/Judge, `evaluate` + `recommend` | not started |
-| 4 | Fact store, fact matching, tailored resume, claim validation, resume diff, application answers | not started |
-| 5 | Application entity, state history, notes, notifier, daily digest | not started |
+| 0 | TypeScript project, CLI skeleton, config loader, SQLite + migrations, logging, tests, README | done |
+| 1 | Source adapter interface, Greenhouse adapter, normalize, dedupe, snapshots, source runs, `scan` + `show` | done |
+| — | Pre-Phase-2 security review and hardening | done |
+| 2 | Lever, Ashby, career pages, discovery scope config, capture modes, `add`, `scope test` | not started |
+| 3 | Criteria engine, hard filters, authenticity screening, Advocate/Skeptic/Judge, evaluation cache, spend accounting, `evaluate` + `recommend` + `verify` | not started |
+| 3.5 | Notifier, daily digest, `schedule install`, local portal (`roleeye ui`) | not started |
+| 4 | Fact store, `.docx`/`.pdf` import as draft facts, tailored resume, claim validation, resume diff, `.docx` output | not started |
+| 5 | Application entity, state history, notes | not started |
 | 6 | SQL search, FTS5, funnel + segment analytics, `stats`, basic `ask` | not started |
 | 7 | Career memory / local RAG, embeddings, query planner, hybrid retrieval | not started |
 | 8 | Private/public export, sanitization, manifest + checksums, secure sync, VPS importer | not started |
@@ -22,6 +24,52 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-08-12 | Repository skeleton follows the layout in `agent.md` and `architecture.md` §7 verbatim, plus `src/core`, `src/util`, `export/`, `scripts/`, `docs/`. | The extra directories are mechanical (shared types, helpers, generated export target, notes) and do not change any architectural boundary. |
+| 2026-08-12 | `better-sqlite3` for persistence. | Synchronous API keeps the ingestion pipeline simple and transactional; `node:sqlite` is still experimental on Node 22. |
+| 2026-08-12 | Hand-written CLI router instead of a framework. | architecture.md §4 allows "a small explicit command router"; avoids a dependency for five commands. |
+| 2026-08-12 | Migrations are TypeScript modules holding SQL strings. | Keeps `tsc` the only build step — no asset-copy stage — while the SQL stays reviewable in version control. |
+| 2026-08-12 | Job IDs are derived from the identity key (`job_<sha256[0:16]>`) rather than random. | Re-ingesting the same posting into a fresh database yields the same ID, so artifact paths and exports stay stable. |
+| 2026-08-12 | Evaluation/application/artifact/note tables ship in migration 001 even though phases 3-5 populate them. | The domain model in architecture.md §8 is fixed; creating the tables now avoids a schema churn migration later. |
+| 2026-08-12 | Added `roleeye list` (not in the documented command set). | `show` needs a job ID and phase 6 owns real search; this is plain SQL filtering, not a substitute for it. |
+| 2026-08-13 | Capture is scoped by user configuration rather than capturing every posting (§36). | A board holds 50-400 roles, nearly all irrelevant to one person. Scope is the largest lever on both noise and cost, and it belongs to the user, not to code. |
+| 2026-08-13 | Added a job authenticity agent for ghost and fraudulent postings (§37). | Deterministic signals from our own longitudinal history — repost cadence, posting longevity — detect evergreen listings that no snapshot-free tool can see. |
+| 2026-08-13 | Token budget is an architectural constraint with accounting and hard limits (§38). | Measured data showed the naive pipeline costs roughly $68 per full pass and repeats it every scan. Filtering and caching cut this about 100x. |
+| 2026-08-13 | Local portal added as Phase 3.5, strictly as a client over existing modules. | YAML is a good storage format and a poor input format, but business logic must not migrate into a web layer. |
+| 2026-08-13 | `.docx`/`.pdf` resume import produces draft facts requiring explicit approval. | Removes the blank-page problem without weakening the rule that every generated claim traces to an approved fact. |
+| 2026-08-13 | Security review conducted before Phase 2 rather than after. | Phase 2 accepts arbitrary career-page URLs and Phase 3 puts posting text into prompts; both amplify weaknesses that are inert today. |
+| 2026-08-13 | Lockfile `resolved` URLs normalized to `registry.npmjs.org`, with `.npmrc` pinning the public registry. | The lockfile had been generated behind a corporate mirror; publishing it would delegate dependency hosting for every contributor and CI job. |
+
+## Phase 1 notes
+
+- Identity hierarchy: source job ID → canonical apply URL → company/title/location/content
+  fingerprint. Titles alone never merge two jobs.
+- Reposts are recorded as events; `first_seen_at` is never rewritten.
+- A changed description writes a new snapshot and keeps the previous one.
+- A failing source marks only its own `source_run` as failed; other sources still persist,
+  and no job is marked closed because of a failed run.
+- Verified end to end against a live public Greenhouse board: 16 jobs ingested, second scan
+  reported 16 unchanged and created no duplicates.
+
+## Pre-Phase-2 hardening notes
+
+Full report: `docs/security-review-phase1.md`. Spend analysis: `docs/spend-analysis.md`.
+
+- Postings are now treated as untrusted input at a single boundary: control
+  characters stripped, escaped markup unable to re-materialize, descriptions capped.
+- All outbound requests pass a URL guard (HTTPS only; private, loopback, and
+  link-local ranges blocked; every redirect hop re-validated). This must be
+  applied to every Phase 2 adapter, including `roleeye add <url>`.
+- Log redaction covers URL-borne credentials and query-string secrets.
+- Lockfile provenance corrected; `npm audit` reports 0 vulnerabilities.
+- Measured corpus: median description 1,532 tokens, ~44% boilerplate
+  (`scripts/measure-corpus.ts` reproduces it).
+
+## Open items carried into Phase 2
+
+- The lockfile was normalized textually because this machine cannot reach
+  `registry.npmjs.org` (TLS interception). Confirm with a clean `npm ci` on a
+  machine or CI runner with public registry access.
+- `scripts/measure-corpus.ts` performs live network calls. It is a developer
+  tool, never invoked by the product or the test suite.
 
 ## Before starting each phase
 

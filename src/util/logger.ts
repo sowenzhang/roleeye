@@ -32,20 +32,60 @@ export function isLogLevel(value: string): value is LogLevel {
 
 const SENSITIVE_KEY = /(pass|secret|token|key|auth|cookie|credential|session)/i;
 
-const SENSITIVE_PATTERNS: readonly RegExp[] = [
-  /\b(?:sk|ghp|ghs|gho|github_pat|xox[abps])[-_][A-Za-z0-9_-]{16,}\b/g,
-  /\bBearer\s+[A-Za-z0-9._-]{12,}\b/gi,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+const REDACTED_LITERAL = '[redacted]';
+
+interface RedactionRule {
+  pattern: RegExp;
+  replace: string;
+}
+
+const SENSITIVE_PATTERNS: readonly RedactionRule[] = [
+  { pattern: /\b(?:sk|ghp|ghs|gho|github_pat|xox[abps])[-_][A-Za-z0-9_-]{16,}\b/g, replace: REDACTED_LITERAL },
+  { pattern: /\bBearer\s+[A-Za-z0-9._-]{12,}\b/gi, replace: REDACTED_LITERAL },
+  {
+    pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+    replace: REDACTED_LITERAL,
+  },
+  // Credentials embedded in a URL: https://user:secret@host/...
+  { pattern: /([a-z][a-z0-9+.-]*:\/\/)[^/@\s:]+:[^/@\s]+@/gi, replace: `$1${REDACTED_LITERAL}@` },
+  // Secrets carried in query strings, which no key-name check would catch.
+  {
+    pattern: /\b(api[_-]?key|access[_-]?token|auth|token|secret|password|passwd|pwd|sig|signature|session)=[^&\s"']+/gi,
+    replace: `$1=${REDACTED_LITERAL}`,
+  },
 ];
 
-export const REDACTED = '[redacted]';
+export const REDACTED = REDACTED_LITERAL;
 
 export function redactString(value: string): string {
   let out = value;
-  for (const pattern of SENSITIVE_PATTERNS) {
-    out = out.replace(pattern, REDACTED);
+  for (const rule of SENSITIVE_PATTERNS) {
+    out = out.replace(rule.pattern, rule.replace);
   }
   return out;
+}
+
+/**
+ * Strips credentials from a URL before it reaches a log or an error message.
+ *
+ * Log context keys like `url` do not look sensitive, but a URL can carry
+ * userinfo or a token query parameter, and warn-level lines are exactly what
+ * users paste into bug reports.
+ */
+export function redactUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password) {
+      url.username = REDACTED;
+      url.password = '';
+    }
+    for (const key of [...url.searchParams.keys()]) {
+      if (SENSITIVE_KEY.test(key)) url.searchParams.set(key, REDACTED);
+    }
+    return url.toString();
+  } catch {
+    return redactString(value);
+  }
 }
 
 export function redactValue(value: unknown, depth = 0): unknown {

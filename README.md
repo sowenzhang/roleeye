@@ -17,7 +17,19 @@ the technical design and implementation phases.
 
 ## Status
 
-Repository skeleton only. Phase 0 (bootstrap) has not been implemented yet.
+**Phase 0 (bootstrap) and Phase 1 (discovery + history) are implemented.**
+
+Working today:
+
+- `roleeye init` — create local config/profile files from the committed examples
+- `roleeye doctor` — validate config, database, migrations, adapters
+- `roleeye scan` — fetch configured sources, normalize, dedupe, persist history
+- `roleeye list` — structured SQL listing of stored jobs
+- `roleeye show` — full local record for one job, with event and snapshot history
+
+Not implemented yet: evaluation, resume tailoring, application tracking, search,
+analytics, export, and sync. Those commands exit with a usage error naming the
+phase that will deliver them. See [`docs/progress.md`](./docs/progress.md).
 
 ## Layout
 
@@ -47,21 +59,52 @@ scripts/      developer/maintenance scripts
 docs/         working notes and decisions
 ```
 
-## Getting started (once Phase 0 lands)
+## Getting started
+
+Requires Node.js 22+.
 
 ```bash
-cp .env.example .env
-cp config/criteria.example.yaml config/criteria.yaml
-cp config/sources.example.yaml config/sources.yaml
-cp profile/career-profile.example.md profile/career-profile.md
-cp profile/accomplishments.example.yaml profile/accomplishments.yaml
-cp profile/master-resume.example.md profile/master-resume.md
-
 npm install
 npm run build
-roleeye doctor
-roleeye scan
+
+node dist/index.js init      # creates config/*.yaml, profile/*, .env, and the database
+# edit config/sources.yaml and add a real Greenhouse board
+node dist/index.js doctor
+node dist/index.js scan
+node dist/index.js list --title engineer
+node dist/index.js show <job-id>
 ```
+
+During development, run the CLI straight from TypeScript:
+
+```bash
+npm run roleeye -- scan --dry-run
+```
+
+`roleeye init` never overwrites an existing file unless you pass `--force`.
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `roleeye init` | Copy example config/profile files and create the database |
+| `roleeye doctor` | Validate config, paths, database, migrations, and adapters |
+| `roleeye scan` | Fetch all enabled sources; `--source <name\|type>`, `--dry-run` |
+| `roleeye list` | Filter stored jobs by company, title, source, country, date |
+| `roleeye show` | Show one job with its history, reposts, and snapshots |
+
+Every command supports `--json` for scripting and returns meaningful exit codes:
+`0` ok, `1` error, `2` usage, `3` config, `4` not found, `5` completed with warnings.
+
+## Development
+
+```bash
+npm test          # unit + integration tests (node:test, no network access)
+npm run typecheck # strict TypeScript across src and tests
+npm run build     # emit dist/
+```
+
+Provider tests run entirely from committed fixtures in `tests/fixtures/`.
 
 ## Rules that must not be broken
 
@@ -70,3 +113,12 @@ roleeye scan
 - Nothing is ever deleted from job history.
 - No application is ever submitted automatically.
 - No resume claim may exist without a matching approved fact ID.
+- Capture is scoped by user configuration, not exhaustive.
+- Job postings are untrusted third-party input at every boundary.
+- Model spend is budgeted, accounted for, and never silently escalated.
+
+## Design notes
+
+- [`docs/progress.md`](./docs/progress.md) — phase status and decision log
+- [`docs/security-review-phase1.md`](./docs/security-review-phase1.md) — threat model, findings, and fixes
+- [`docs/spend-analysis.md`](./docs/spend-analysis.md) — measured token costs and the pipeline that controls them
