@@ -1,6 +1,7 @@
 import type { ArchetypesConfig } from '../config/archetype-schema.js';
 import type { Repositories } from '../db/repositories/index.js';
 import type { JobRecord } from '../db/repositories/jobs.js';
+import type { ArchetypeAssignment } from '../db/repositories/resumes.js';
 import { requirementsSchema, type ExtractedRequirements } from '../evaluate/schemas.js';
 import type { Logger } from '../util/logger.js';
 import { archetypesHash, classify } from './archetypes.js';
@@ -12,6 +13,10 @@ import { archetypesHash, classify } from './archetypes.js';
  * because the user knows something the classifier does not. And the archetype
  * hash is part of the assignment key, so editing an archetype re-opens the
  * question instead of leaving yesterday's answer in place.
+ *
+ * Everything is read in a fixed number of queries and written in one
+ * transaction. Per-job lookups cost roughly six statements per role — 601 for
+ * 100 jobs — which is a scan-sized price for a loop over data we already hold.
  */
 
 export interface AssignmentSummary {
@@ -23,15 +28,15 @@ export interface AssignmentSummary {
   modelCalls: 0;
 }
 
+function parseRequirements(advocate: unknown): ExtractedRequirements | undefined {
+  const parsed = requirementsSchema.safeParse((advocate as { requirements?: unknown } | undefined)?.requirements);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /** The requirements Phase 3b stored, if this role has been evaluated. */
 export function storedRequirements(repos: Repositories, jobId: string): ExtractedRequirements | undefined {
   const evaluation = repos.evaluations.latestForJob(jobId);
-  if (!evaluation) return undefined;
-
-  const advocate = evaluation.advocate as { requirements?: unknown } | undefined;
-  const parsed = requirementsSchema.safeParse(advocate?.requirements);
-
-  return parsed.success ? parsed.data : undefined;
+  return evaluation ? parseRequirements(evaluation.advocate) : undefined;
 }
 
 export function assignArchetypes(
@@ -41,33 +46,47 @@ export function assignArchetypes(
   options: { logger?: Logger; force?: boolean } = {},
 ): AssignmentSummary {
   const hash = archetypesHash(config);
+  const jobIds = jobs.map((job) => job.id);
+
+  const { manual, current } = repos.assignments.loadForJobs(jobIds, hash);
+  const evaluations = repos.evaluations.latestForJobs(jobIds);
+
+  // A forced run is the user saying "decide this again", which has to include
+  // the corrections they made earlier. Leaving those live meant the next
+  // ordinary run copied them straight back over the new answer.
+  if (options.force && manual.size > 0) {
+    repos.assignments.supersedeManual([...manual.keys()]);
+    manual.clear();
+  }
+
+  const pending: Array<Omit<ArchetypeAssignment, 'id' | 'assignedAt'>> = [];
   let assigned = 0;
   let unassigned = 0;
   let keptManual = 0;
 
   for (const job of jobs) {
-    const manual = repos.assignments.manualForJob(job.id);
+    const correction = manual.get(job.id);
 
-    if (manual && !options.force) {
+    if (correction) {
       // Re-recorded under the current hash so the correction survives an edit
       // to the archetype file; the user's answer does not expire.
-      if (manual.archetypeHash !== hash) {
-        repos.assignments.save({
+      if (correction.archetypeHash !== hash) {
+        pending.push({
           jobId: job.id,
-          archetypeId: manual.archetypeId,
+          archetypeId: correction.archetypeId,
           archetypeHash: hash,
-          score: manual.score,
+          score: correction.score,
           runnerUpId: undefined,
           runnerUpScore: undefined,
           method: 'manual',
-          evidence: manual.evidence,
+          evidence: correction.evidence,
         });
       }
       keptManual += 1;
       continue;
     }
 
-    const existing = repos.assignments.find(job.id, hash);
+    const existing = current.get(job.id);
     if (existing && !options.force) {
       if (existing.archetypeId) assigned += 1;
       else unassigned += 1;
@@ -78,12 +97,12 @@ export function assignArchetypes(
       {
         title: job.title,
         descriptionText: job.descriptionText,
-        requirements: storedRequirements(repos, job.id),
+        requirements: parseRequirements(evaluations.get(job.id)?.advocate),
       },
       config,
     );
 
-    repos.assignments.save({
+    pending.push({
       jobId: job.id,
       archetypeId: result.archetypeId,
       archetypeHash: hash,
@@ -98,7 +117,9 @@ export function assignArchetypes(
     else unassigned += 1;
   }
 
-  options.logger?.debug('classification complete', { assigned, unassigned, keptManual });
+  repos.assignments.saveAll(pending);
+
+  options.logger?.debug('classification complete', { assigned, unassigned, keptManual, written: pending.length });
 
   return {
     considered: jobs.length,
