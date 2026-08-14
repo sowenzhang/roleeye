@@ -43,12 +43,20 @@ export interface AgentCliOptions {
 /**
  * Deny everything, then ask a question.
  *
+ * `--silent` makes the CLI print only the agent's answer. Without it the output
+ * carries a human summary (credits, tokens, a resume command) that has to be
+ * pattern-matched off, and pattern-matching a display format is how a parser
+ * breaks silently on an upgrade. The trade is that per-call token counts are no
+ * longer available, which is acceptable: agent calls bill against a quota, so
+ * the accounting unit is the call, not the token.
+ *
  * `--no-custom-instructions` matters as much as `--deny-tool`: an agent
  * normally loads instruction files from the working directory and the user
  * profile, and those would silently join a prompt that also contains an
  * untrusted job posting.
  */
 export const COPILOT_SAFE_ARGS = [
+  '--silent',
   '--deny-tool=all',
   '--disable-builtin-mcps',
   '--no-custom-instructions',

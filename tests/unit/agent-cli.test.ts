@@ -66,6 +66,14 @@ describe('agent CLI provider', () => {
     assert.match(args[promptIndex + 1]!, /del \/f \/q/, 'the text is data, handed over verbatim');
   });
 
+  it('asks for the answer only, so no display format has to be parsed', async () => {
+    const { cli, instance } = provider(['{"seniority":"staff","hands_on":true}']);
+
+    await instance.generate(request);
+
+    assert.ok(cli.calls[0]!.args.includes('--silent'), 'stats output would have to be pattern-matched off');
+  });
+
   it('recovers the answer from the human summary the CLI prints after it', async () => {
     const { instance } = provider([
       [
