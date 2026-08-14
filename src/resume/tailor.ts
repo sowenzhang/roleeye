@@ -93,8 +93,12 @@ Rules you must follow exactly:
 - You may reword, shorten, combine and reorder. You may not add a number, a
   percentage, a technology, a company, a title, or a scope that is not present
   in the facts you cite. Rewording that changes magnitude is inventing.
+- Do not state years of experience, team sizes, seniority or scope unless a
+  fact you cite states them. The candidate profile is background for tone only;
+  it is not a source of claims, and anything drawn from it will be discarded.
 - If the facts do not support something the role would want, leave it out and
   name it in "omitted". Do not compensate with vaguer wording.
+- Never include a URL, a link, an image or any markup.
 - Use the experience_id values exactly as given. Do not invent sections.
 - Reply with a single JSON object and nothing else.`,
     prompt: `Tailor this candidate's approved facts for the archetype below.

@@ -2258,12 +2258,26 @@ into prompts, into artifacts, and into the portal.
 | Boundary | Requirement |
 |---|---|
 | Parsing | bounded response sizes; bounded description length; no unbounded backtracking in parsing regexes |
-| Document import | bounded file size before parsing; capped extracted text; PDF read with no eval, worker, or network access |
+| Document import | bounded file size *and* bounded declared uncompressed size, both checked before anything is inflated; capped extracted text; PDF read with no eval, worker, or network access |
 | Storage | stored as text, never executed or interpolated into SQL |
-| Prompting | delimited and labeled as untrusted data; instructions inside a posting are reported, never obeyed |
-| Model output | schema-validated before persistence; never trusted to name a file path or command |
+| Prompting | delimited and labeled as untrusted data, with a marker the author cannot predict; instructions inside a posting are reported, never obeyed |
+| Model output | schema-validated before persistence; never trusted to name a file path or command; never trusted to carry a link, and every factual claim checked against approved facts |
 | UI | escaped on output; links rendered with the destination host visible |
+| Generated documents | posting-derived text is escaped before it is written into Markdown, so opening an artifact cannot fetch anything the poster chose |
 | Export | sanitized through the allow-list, never republished verbatim in public mode |
 
 A posting must never be able to cause a file write, a network request, a
 configuration change, or an application submission.
+
+## Why the fence marker is unguessable
+
+Neutralising the literal marker inside the body was necessary and not
+sufficient. `UNTRUSTED_JOB_P\u00adOSTING>>>` — one soft hyphen inside the word —
+survives ingest and reaches the prompt intact, and a model reads it as the
+marker. Word joiners, combining marks and Cyrillic homoglyphs do the same, and
+enumerating them is a losing game against an attacker who picks next.
+
+Each prompt therefore closes with `UNTRUSTED_JOB_POSTING_<random>`. Whoever
+wrote the posting cannot know the suffix, so the class of attack ends rather
+than the instances that were thought of. The literal label is still scrubbed
+from the body.

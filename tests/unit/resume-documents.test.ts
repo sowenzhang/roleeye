@@ -76,6 +76,33 @@ describe('document import readers', () => {
     assert.equal(first.sha256, second.sha256);
   });
 
+  it('refuses an archive that unpacks to far more than it weighs', async () => {
+    // A 249 KB file was measured expanding to 145 MB of XML. The compressed
+    // size limit says nothing about that, and mammoth decompresses everything
+    // before any text cap applies.
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    zip.file('word/document.xml', 'A'.repeat(80 * 1024 * 1024));
+    const bomb = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+
+    assert.ok(bomb.length < 1024 * 1024, 'the bomb is small enough to pass the file size check');
+
+    await assert.rejects(() => readDocument(file('bomb.docx', bomb)), /built to exhaust memory|unpacks to/);
+  });
+
+  it('refuses a .docx that is not a readable archive', async () => {
+    await assert.rejects(() => readDocument(file('broken.docx', 'not a zip at all')), /not a readable/);
+  });
+
+  it('accepts a real .docx of ordinary size', async () => {
+    const { Document, Packer, Paragraph } = await import('docx');
+    const document = new Document({ sections: [{ children: [new Paragraph({ text: 'Built the ledger service.' })] }] });
+    const buffer = await Packer.toBuffer(document);
+
+    const result = await readDocument(file('fine.docx', Buffer.from(buffer)));
+    assert.match(result.text, /Built the ledger service/);
+  });
+
   it('tells the user how to fix a missing PDF reader instead of failing obscurely', async () => {
     await assert.rejects(
       () =>

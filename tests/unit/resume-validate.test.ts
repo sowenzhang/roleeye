@@ -158,4 +158,87 @@ describe('claim validation', () => {
       [true, false],
     );
   });
+
+  /**
+   * Everything below was found by two independent model reviews of this file.
+   * Each one is a way a real model embellishes, and each passed validation
+   * before these tests existed.
+   */
+  describe('bypasses found by review', () => {
+    const experiences = new Map([
+      ['exp_1', { company: 'Acme Corp', role: 'Staff Software Engineer', startedOn: 'Jan 2019', endedOn: 'Present' }],
+    ]);
+
+    const check = (text: string) => validateClaim({ text, factIds: ['fact_1'] }, facts, { experiences });
+
+    it('rejects a technology written in lower case', () => {
+      // Capitalisation was the only signal, and a posting can ask a model to
+      // write in lower case.
+      assert.equal(check('Used kubernetes and react in the pricing service.').supported, false);
+    });
+
+    it('rejects a technology at the start of the sentence', () => {
+      // The first word is skipped so that "Rewrote…" is not read as a claim,
+      // which left the opening word as a free slot for an invented one.
+      assert.equal(check('Kubernetes ran the pricing service I rewrote.').supported, false);
+    });
+
+    it('rejects full-width and other unicode digits', () => {
+      assert.equal(check('Cut p99 checkout latency by \uFF16\uFF10%.').supported, false);
+      assert.equal(check('Cut p99 checkout latency by \u0664\u0663 percent.').supported, false);
+    });
+
+    it('rejects a magnitude written as a word', () => {
+      assert.equal(check('Doubled throughput on the pricing service.').supported, false);
+    });
+
+    it('rejects invented scope and seniority that carry no number', () => {
+      for (const text of [
+        'Managed a large team on the pricing service.',
+        'Owned company-wide strategy for the pricing service.',
+        'Chief Technology Officer for the pricing service.',
+      ]) {
+        assert.equal(check(text).supported, false, text);
+      }
+    });
+
+    it('rejects markup, links and urls outright', () => {
+      // A resume bullet never legitimately contains one, and a posting that
+      // talks a model into emitting one turns opening the file into a request
+      // to the attacker.
+      for (const text of [
+        'Cut p99 latency 43% ![p](http://attacker.example/x.png).',
+        'Cut p99 latency 43%, see http://attacker.example/x.png',
+        'Cut p99 latency 43% <img src=x onerror=1>.',
+      ]) {
+        const result = check(text);
+        assert.equal(result.supported, false, text);
+        assert.ok(result.problems.some((problem) => problem.code === 'markup'));
+      }
+    });
+
+    it('does not treat a sentence opener as a product name', () => {
+      // A live run dropped a correct summary because "Works" began its second
+      // sentence: "…platform work. Works in Go, TypeScript…".
+      const result = validateClaim(
+        {
+          text: 'Rewrote the pricing service in Go, cutting p99 latency 43%. Works across the checkout path.',
+          factIds: ['fact_1'],
+        },
+        facts,
+        { experiences },
+      );
+
+      assert.equal(result.supported, true, JSON.stringify(result.problems));
+    });
+
+    it('still accepts an honest rewording', () => {
+      // The point of the rules above is to be strict without being useless.
+      assert.equal(check('Rewrote the pricing service in Go, cutting p99 latency 43%.').supported, true);
+      assert.equal(
+        check('Staff Software Engineer at Acme Corp since 2019, cutting p99 latency 43%.').supported,
+        true,
+      );
+    });
+  });
 });

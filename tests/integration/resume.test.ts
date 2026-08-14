@@ -397,6 +397,139 @@ describe('resume pipeline', () => {
     assert.match(written, /from `fact_/);
   });
 
+  it('returns a fact to draft when its provenance changes, not just its words', async () => {
+    // A review found an approved *unattached* statement being re-imported under
+    // an employer and keeping its approval, which made an unreviewed company
+    // name quotable evidence for a generated claim.
+    await importResume();
+    const { fact } = repos.facts.upsert({
+      statement: 'Built reliable payment services for customers.',
+      origin: 'manual',
+    });
+    repos.facts.approve([fact.id]);
+    assert.equal(repos.facts.get(fact.id)?.status, 'approved');
+
+    const attacker = repos.facts.upsertExperience({ company: 'Evil Corp', role: 'Chief Executive Officer' });
+    const { outcome } = repos.facts.upsert({
+      statement: fact.statement,
+      experienceId: attacker.id,
+      origin: 'import',
+    });
+
+    assert.equal(outcome, 'updated');
+    assert.equal(repos.facts.get(fact.id)?.status, 'draft');
+    assert.equal(repos.facts.get(fact.id)?.approvedAt, undefined);
+  });
+
+  it('does not resurrect a retired fact as approved', async () => {
+    await importResume();
+    const [fact] = repos.facts.list({});
+    assert.ok(fact);
+    repos.facts.approve([fact.id]);
+    repos.facts.retire(fact.id);
+
+    repos.facts.upsert({ statement: fact.statement, origin: 'import' });
+
+    assert.equal(repos.facts.get(fact.id)?.status, 'draft');
+    assert.equal(repos.facts.approvedFacts().length, 0);
+  });
+
+  it('notices a re-tagged fact set, because tags decide what a resume draws on', async () => {
+    await importResume();
+    repos.facts.approve(repos.facts.list({}).map((entry) => entry.id));
+
+    const before = repos.facts.approvedSetHash();
+    const [fact] = repos.facts.approvedFacts();
+    assert.ok(fact);
+
+    repos.facts.upsert({ statement: fact.statement, tags: ['payments'], origin: 'manual' });
+    repos.facts.approve(repos.facts.list({ status: 'draft' }).map((entry) => entry.id));
+
+    assert.notEqual(before, repos.facts.approvedSetHash());
+  });
+
+  it('refuses a delta from a resume whose facts have changed since', async () => {
+    await importResume();
+    repos.facts.approve(repos.facts.list({}).map((entry) => entry.id));
+    const experience = repos.facts.listExperiences()[0];
+    assert.ok(experience);
+
+    const provider = scriptedFor(repos.facts.approvedFacts(), experience.id);
+    await new ResumeGenerator({ config: config(), repos, provider, logger: silentLogger }).generate('ai-platform');
+
+    const ingested = ingestJob(repos, discovered(), {
+      seenAt: '2026-08-13T10:00:00.000Z',
+      scanId: undefined,
+      repostGapDays: 21,
+      captureMode: 'full',
+    });
+    assert.ok(ingested.jobId);
+    const job = repos.jobs.findById(ingested.jobId);
+    assert.ok(job);
+    assignArchetypes(repos, ARCHETYPES, [job], { logger: silentLogger });
+
+    // The user retires a fact the stored resume rests on.
+    const cited = repos.facts.approvedFacts().find((entry) => /rewards platform/.test(entry.statement));
+    assert.ok(cited);
+    repos.facts.retire(cited.id);
+
+    await assert.rejects(
+      () => buildDelta({ config: config(), repos, provider, logger: silentLogger, job, force: true }),
+      /stale/,
+      'a delta must never print claims resting on facts that are no longer approved',
+    );
+  });
+
+  it('escapes posting-controlled text written into the delta', async () => {
+    await importResume();
+    repos.facts.approve(repos.facts.list({}).map((entry) => entry.id));
+    const experience = repos.facts.listExperiences()[0];
+    assert.ok(experience);
+
+    const provider = scriptedFor(repos.facts.approvedFacts(), experience.id);
+    await new ResumeGenerator({ config: config(), repos, provider, logger: silentLogger }).generate('ai-platform');
+
+    const ingested = ingestJob(
+      repos,
+      discovered({
+        title: 'Senior ML Engineer ![pixel](http://attacker.example/ping.png)',
+        companyName: 'Northwind [click](http://attacker.example/steal)',
+      }),
+      { seenAt: '2026-08-13T10:00:00.000Z', scanId: undefined, repostGapDays: 21, captureMode: 'full' },
+    );
+    assert.ok(ingested.jobId);
+    const job = repos.jobs.findById(ingested.jobId);
+    assert.ok(job);
+    assignArchetypes(repos, ARCHETYPES, [job], { logger: silentLogger });
+
+    const delta = await buildDelta({ config: config(), repos, provider, logger: silentLogger, job, force: true });
+    const written = readFileSync(delta.artifacts[0] as string, 'utf8');
+
+    const remote = [...written.matchAll(/!?\[[^\]]*\]\((https?:\/\/[^)]+)\)/g)];
+    assert.equal(remote.length, 0, 'opening the artifact must not fetch anything the poster chose');
+  });
+
+  it('writes no current generation when the documents cannot be written', async () => {
+    await importResume();
+    repos.facts.approve(repos.facts.list({}).map((entry) => entry.id));
+    const experience = repos.facts.listExperiences()[0];
+    assert.ok(experience);
+
+    // Artifacts directory is a file, so every write fails.
+    const blocked = config();
+    const blocker = path.join(root, 'blocker');
+    writeFileSync(blocker, 'not a directory', 'utf8');
+    blocked.env.paths.artifactsDir = blocker;
+
+    const provider = scriptedFor(repos.facts.approvedFacts(), experience.id);
+    const generator = new ResumeGenerator({ config: blocked, repos, provider, logger: silentLogger });
+
+    await assert.rejects(() => generator.generate('ai-platform'));
+
+    assert.equal(repos.resumes.current('ai-platform'), undefined, 'a failed write must not leave a current resume');
+    assert.equal(repos.artifacts.listForArchetype('ai-platform').length, 0);
+  });
+
   it('takes the headline from the archetype, never from the posting', () => {
     assert.equal(chooseHeadline('Senior ML Engineer, Ranking', ['ml engineer'], 'AI platform'), 'Ml Engineer');
     assert.equal(chooseHeadline('Wizard of Light Bulb Moments', ['ml engineer'], 'AI platform'), 'AI platform');

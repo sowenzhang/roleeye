@@ -263,9 +263,18 @@ export class FactRepository {
 
       if (unchanged) return { fact: current, outcome: 'unchanged' };
 
+      // Anything that changes the evidence behind a fact returns it to draft.
+      //
+      // Approval covers the statement *and* what it is attached to: the
+      // employer, dates and tags of a fact are evidence a generated claim may
+      // quote. A review showed an approved statement being re-imported under a
+      // new employer and keeping its approval, which let an unreviewed company
+      // name become quotable. Un-retiring is the same problem — the user
+      // retired it deliberately.
       this.db
         .prepare(
-          `UPDATE facts SET tags_json = @tags, experience_id = @experience_id, retired_at = NULL, updated_at = @now
+          `UPDATE facts SET tags_json = @tags, experience_id = @experience_id, retired_at = NULL,
+             status = 'draft', approved_at = NULL, updated_at = @now
            WHERE id = @id`,
         )
         .run({ id: current.id, tags: JSON.stringify(tags), experience_id: toDb(experienceId), now: timestamp });
@@ -394,12 +403,26 @@ export class FactRepository {
    * Statement hashes rather than row ids: re-importing into a fresh database
    * produces different ids for the same words, and a resume generated from the
    * same words is not stale.
+   *
+   * Tags and employer are included because both change what a generation would
+   * produce — tags decide which facts an archetype draws on, and the employer
+   * is evidence a claim may quote. Hashing statements alone reported a resume
+   * as current after re-tagging had removed a fact from its input set.
    */
   approvedSetHash(): string {
-    const hashes = this.approvedFacts()
-      .map((fact) => fact.statementHash)
+    const experiences = new Map(this.listExperiences().map((entry) => [entry.id, entry]));
+
+    const parts = this.approvedFacts()
+      .map((fact) => {
+        const experience = fact.experienceId ? experiences.get(fact.experienceId) : undefined;
+        const where = experience
+          ? `${experience.company}|${experience.role}|${experience.startedOn ?? ''}|${experience.endedOn ?? ''}`
+          : '';
+        return `${fact.statementHash}|${[...fact.tags].sort().join(',')}|${where}`;
+      })
       .sort();
-    return sha256(hashes.join('|'));
+
+    return sha256(parts.join('\n'));
   }
 
   counts(): { draft: number; approved: number; retired: number } {

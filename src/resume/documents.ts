@@ -21,6 +21,17 @@ export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 /** Roughly 100 pages of text. Beyond this the file is not a resume. */
 export const MAX_TEXT_CHARS = 400_000;
 
+/**
+ * What a `.docx` may expand to once unzipped.
+ *
+ * The file-size limit bounds the compressed bytes, and a 249 KB archive was
+ * measured expanding to 145 MB of XML — a 598x ratio, well inside what DEFLATE
+ * allows. Mammoth decompresses the whole part into a string before any text cap
+ * applies, so the limit that matters is this one, checked against the sizes the
+ * archive itself declares before a byte is inflated.
+ */
+export const MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+
 export const EXTRACTOR_VERSION = 'v1';
 
 export interface ExtractedDocument {
@@ -109,6 +120,72 @@ function capText(text: string, warnings: string[]): string {
   return cleaned.slice(0, MAX_TEXT_CHARS);
 }
 
+/**
+ * Total declared uncompressed size of a ZIP archive.
+ *
+ * Reads only the central directory, which every ZIP writer emits and which
+ * states each entry's uncompressed length. Nothing is inflated, so a bomb is
+ * refused for what it claims to be rather than after it has been unpacked into
+ * memory. A truncated or unreadable directory returns undefined, and the caller
+ * treats that as a file it will not accept.
+ */
+export function declaredZipSize(buffer: Buffer): number | undefined {
+  // End of central directory: signature, then the offset of the directory.
+  const MIN_EOCD = 22;
+  const MAX_COMMENT = 0xffff;
+  const start = Math.max(0, buffer.length - MIN_EOCD - MAX_COMMENT);
+
+  let eocd = -1;
+  for (let index = buffer.length - MIN_EOCD; index >= start; index -= 1) {
+    if (buffer.readUInt32LE(index) === 0x06054b50) {
+      eocd = index;
+      break;
+    }
+  }
+
+  if (eocd < 0) return undefined;
+
+  const entries = buffer.readUInt16LE(eocd + 10);
+  let offset = buffer.readUInt32LE(eocd + 16);
+  let total = 0;
+
+  for (let index = 0; index < entries; index += 1) {
+    if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== 0x02014b50) return undefined;
+
+    // Zip64 stores 0xffffffff here and the real size in an extra field. We do
+    // not parse that: a resume needing zip64 is already past every limit.
+    const uncompressed = buffer.readUInt32LE(offset + 24);
+    if (uncompressed === 0xffffffff) return undefined;
+
+    total += uncompressed;
+
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+
+  return total;
+}
+
+function assertArchiveIsSane(buffer: Buffer, file: string): void {
+  const declared = declaredZipSize(buffer);
+
+  if (declared === undefined) {
+    throw new RoleEyeError(
+      `${path.basename(file)} is not a readable .docx archive`,
+      ExitCode.UsageError,
+    );
+  }
+
+  if (declared > MAX_UNCOMPRESSED_BYTES) {
+    throw new RoleEyeError(
+      `${path.basename(file)} unpacks to ${(declared / 1024 / 1024).toFixed(0)} MB, over the ${MAX_UNCOMPRESSED_BYTES / 1024 / 1024} MB limit. A resume is not this large; this file is built to exhaust memory.`,
+      ExitCode.UsageError,
+    );
+  }
+}
+
 interface MammothModule {
   extractRawText(input: { buffer: Buffer }): Promise<{ value: string; messages: { message: string }[] }>;
 }
@@ -144,7 +221,9 @@ export interface ReadOptions {
   loadMammoth?: () => Promise<MammothModule>;
 }
 
-async function readDocx(buffer: Buffer, warnings: string[], options: ReadOptions): Promise<string> {
+async function readDocx(buffer: Buffer, warnings: string[], options: ReadOptions, file: string): Promise<string> {
+  assertArchiveIsSane(buffer, file);
+
   const load = options.loadMammoth ?? (async (): Promise<MammothModule> => (await import('mammoth')) as unknown as MammothModule);
   const mammoth = await load();
   const result = await mammoth.extractRawText({ buffer });
@@ -213,7 +292,7 @@ export async function readDocument(file: string, options: ReadOptions = {}): Pro
 
   switch (format) {
     case 'docx':
-      raw = await readDocx(buffer, warnings, options);
+      raw = await readDocx(buffer, warnings, options, file);
       extractor = 'mammoth';
       break;
     case 'pdf':

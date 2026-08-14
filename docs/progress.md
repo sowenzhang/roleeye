@@ -87,6 +87,14 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-14 | Validation counts the employer, title and dates of a cited fact's own experience as evidence. | The first live generation wrote "Staff software engineer at Acme Corp since 2019" and had it rejected as invention. The store holds that data — it is the section heading of the resume — but no fact statement repeats it, so the summary was unwriteable. Evidence is still per cited fact, so a claim cannot borrow one employer's name while citing another's work. |
 | 2026-08-14 | A resume bullet is the only thing extraction turns into a fact. | Resume prose is summary and self-description. Importing it produces a store full of "Results-driven engineer with a passion for scale" — sentences the user would never put on a tailored resume and now has to reject one at a time. |
 | 2026-08-14 | `npm run typecheck` never checked a single test file. | `tsconfig.tests.json` listed `tests/**/*.ts` in `include`, but inherited `exclude: ["tests"]` from the base config, which wins. Sixteen type errors were sitting in the suite, invisible because `tsx` strips types without checking them. |
+| 2026-08-14 | The prompt fence marker now carries a random suffix per prompt. | Two independent model reviews attacked Phase 4. One found that neutralising the literal marker is not enough: a soft hyphen, a word joiner, a combining mark or a Cyrillic homoglyph inside the word all survive ingest and read to a model as the marker. Enumerating those characters is a losing game; a suffix the poster cannot predict ends the class. |
+| 2026-08-14 | Claim validation gained unicode digit folding, a lower-case technology check, a scope-and-seniority check, and an outright ban on links and markup. | The reviews walked through the validator with `kubernetes` in lower case, `６０%` in full-width digits, "Doubled revenue", "Managed a large team", and `![p](http://attacker/x.png)`. Every one reached a document. The last is the worst: it makes opening your own resume a network request to whoever wrote the posting. |
+| 2026-08-14 | Posting-derived text is escaped before it is written into Markdown artifacts. | Reproduced: a job title of `![pixel](http://attacker/ping.png)` put three attacker URLs into `resume-delta.md`. The rule says a posting must never cause a network request; previewing the file was one. |
+| 2026-08-14 | `.docx` import bounds the *declared uncompressed* size, read from the archive's central directory before anything is inflated. | The 10 MB file cap bounds compressed bytes and nothing else. Measured: a 249 KB file expanding to 145 MB of XML — 598x — and 544 MB of resident memory, because the text cap only applies after mammoth has decompressed everything. |
+| 2026-08-14 | Approval is bound to a fact's provenance, not only its words. | An approved unattached statement could be re-imported under an attacker-supplied employer and keep its approval, making an unreviewed company name quotable evidence. Any change to the experience or tags now returns the fact to draft, and un-retiring does too. |
+| 2026-08-14 | A delta refuses a stale resume and revalidates every claim before printing it. | It reused the `supported` flag stored at generation time, so a fact retired afterwards still reached the document. A stored verdict is not a current one. |
+| 2026-08-14 | Documents are written before the generation row is committed. | Saving first superseded the previous generation, so a failed write left the database reporting a current resume that did not exist, and the next run saw nothing stale and refused to regenerate. |
+| 2026-08-14 | `approvedSetHash` covers tags and employer, not just statements. | Tags decide which facts an archetype draws on. Re-tagging changed the input set while the resume was still reported current. |
 
 ## Phase 4 notes
 
@@ -162,6 +170,49 @@ is guessed and the ambiguity is reported.
 Everything imported is a draft. Re-importing the same file reconciles rather
 than duplicating, and editing an approved statement returns it to draft, because
 approval was given to particular words.
+
+### Two model reviews attacked this phase before it merged
+
+GPT-5.6 Sol reviewed the implementation and Gemini 3.1 Pro reviewed it for
+security, independently. Both returned **no-go**. Every finding below was
+reproduced here before it was acted on, and two were reproduced *and rejected*:
+
+- The claimed zero-width fence bypass (`U+200B`) is already contained, because
+  `stripControlCharacters` removes it at ingest. The vulnerability was real, but
+  through `U+00AD`, `U+2060` and combining marks — characters that set misses.
+- Re-importing an already-attached fact under a different employer does **not**
+  move it; the first attachment wins. The hole was narrower: an *unattached*
+  approved fact could acquire an attacker-supplied employer.
+
+What they found that was real and is now fixed: the fence marker, the validator
+bypasses (lower-case technologies, unicode digits, written magnitudes, invented
+scope, links), Markdown injection into artifacts, the decompression bomb,
+approval surviving a provenance change, stale claims in deltas, and a failed
+write leaving a phantom "current" resume.
+
+### What live testing changed, again
+
+The tightened validator was run against the real model before being believed.
+It immediately dropped a *correct* summary, because "Works" opened the second
+sentence and the capitalisation heuristic only exempted the first word of the
+claim. Fixed to exempt every sentence opener, which is safe because lower-case
+technologies are now caught by lexicon and shape rather than by case.
+
+The next live run dropped the summary again — this time correctly: the model had
+written "12 years of experience", which appears in the career profile and in no
+approved fact. The profile is context for tone, not a source of claims. Saying
+so explicitly in the prompt produced a complete, fully supported resume.
+
+### Known and deliberately not fixed yet
+
+- `statement_hash` is globally unique, so the same sentence under two employers
+  collapses into one fact and the second provenance is lost. Fixing it means
+  scoping identity to the experience, which is a migration.
+- A `--force` reclassification does not retire an older manual override, so the
+  next normal pass copies it forward.
+- `assignArchetypes` issues roughly six queries per job (601 for 100 jobs;
+  851 ms for 5,000 in memory). It should batch-load and write in one
+  transaction.
 
 ## Phase 3.5 notes
 

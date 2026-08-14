@@ -164,7 +164,11 @@ function listFacts(context: CommandContext): ExitCodeValue {
 
   for (const fact of facts) {
     const where = fact.experienceId ? experiences.get(fact.experienceId)?.company ?? '' : '(unattached)';
-    printLine(context, `  ${fact.status === 'approved' ? '✓' : ' '} ${fact.id}  ${truncate(where, 16).padEnd(16)} ${truncate(fact.statement, 88)}`);
+    printLine(context, `  ${fact.status === 'approved' ? '✓' : ' '} ${fact.id}  ${truncate(where, 16)}`);
+    // The full statement, never truncated: this is the text the user is
+    // approving, and a review pointed out that an ellipsis is exactly where an
+    // instruction smuggled into an imported document would hide.
+    printLine(context, `      ${fact.statement}`);
   }
 
   return ExitCode.Ok;

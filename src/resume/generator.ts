@@ -248,6 +248,20 @@ export class ResumeGenerator {
       });
     }
 
+    // The documents are written before the generation is recorded.
+    //
+    // Saving first supersedes the previous generation, so a failing write left
+    // the database claiming a current resume that did not exist on disk — and
+    // the next run, seeing nothing stale, refused to regenerate it. Writing
+    // first means a failure costs the model call and nothing else.
+    const staged = await this.render(document, {
+      archetype: inputs.archetype,
+      experiences: knownExperiences,
+      approved,
+      supportedSummary: summaryValidation.supported,
+      supportedText,
+    });
+
     const generation = repos.resumes.save({
       archetypeId,
       archetypeHash: inputs.archetypeHash,
@@ -262,20 +276,29 @@ export class ResumeGenerator {
       claims,
     });
 
-    const artifacts = await this.write(generation, document, {
-      archetype: inputs.archetype,
-      experiences: knownExperiences,
-      approved,
-      supportedSummary: summaryValidation.supported,
-      supportedText,
-    });
+    for (const artifact of staged) {
+      repos.artifacts.record({
+        generationId: generation.id,
+        archetypeId: inputs.archetype.id,
+        type: artifact.type,
+        path: artifact.path,
+        checksum: artifact.checksum,
+        contentHash: inputs.factSetHash,
+        metadata: { model, provider: provider.name },
+      });
+    }
 
-    return { outcome: 'generated', generation, dropped, artifacts, costUsd: cost };
+    return {
+      outcome: 'generated',
+      generation,
+      dropped,
+      artifacts: staged.map((artifact) => artifact.path),
+      costUsd: cost,
+    };
   }
 
   /** Writes the documents. Only supported claims are ever rendered. */
-  private async write(
-    generation: ResumeGeneration,
+  private async render(
     document: TailoredResume,
     context: {
       archetype: ArchetypeConfig;
@@ -284,8 +307,8 @@ export class ResumeGenerator {
       supportedSummary: boolean;
       supportedText: Set<string>;
     },
-  ): Promise<string[]> {
-    const { config, repos } = this.options;
+  ): Promise<{ type: string; path: string; checksum: string }[]> {
+    const { config } = this.options;
     const directory = path.join(config.env.paths.artifactsDir, 'archetypes', context.archetype.id);
     const statements = new Map(context.approved.map((fact) => [fact.id, fact.statement]));
 
@@ -310,22 +333,10 @@ export class ResumeGenerator {
     const docxPath = path.join(directory, 'resume.docx');
     const docxBuffer = await renderDocx(renderInputs, docxPath);
 
-    const record = (file: string, type: string, checksum: string): void => {
-      repos.artifacts.record({
-        generationId: generation.id,
-        archetypeId: context.archetype.id,
-        type,
-        path: file,
-        checksum,
-        contentHash: generation.factSetHash,
-        metadata: { model: generation.model, provider: generation.provider },
-      });
-    };
-
-    record(markdown.path, 'resume-md', markdown.checksum);
-    record(provenance.path, 'resume-provenance', provenance.checksum);
-    record(docxPath, 'resume-docx', sha256(docxBuffer.toString('base64')));
-
-    return [markdown.path, provenance.path, docxPath];
+    return [
+      { type: 'resume-md', path: markdown.path, checksum: markdown.checksum },
+      { type: 'resume-provenance', path: provenance.path, checksum: provenance.checksum },
+      { type: 'resume-docx', path: docxPath, checksum: sha256(docxBuffer.toString('base64')) },
+    ];
   }
 }
