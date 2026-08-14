@@ -8,6 +8,7 @@ import { listCommand } from './list.js';
 import { recommendCommand, statsCommand } from './recommend.js';
 import { digestCommand } from './digest.js';
 import { resumeCommand } from './resume.js';
+import { applyCommand } from './apply.js';
 import { scanCommand } from './scan.js';
 import { scheduleCommand } from './schedule.js';
 import { scopeCommand } from './scope.js';
@@ -29,6 +30,7 @@ export const commands: readonly Command[] = [
   recommendCommand,
   digestCommand,
   resumeCommand,
+  applyCommand,
   verifyCommand,
   listCommand,
   showCommand,
@@ -44,9 +46,6 @@ export function findCommand(name: string | undefined): Command | undefined {
 
 /** Commands documented in agent.md that later phases will implement. */
 const PLANNED: ReadonlyArray<readonly [string, string]> = [
-  ['apply-record', 'phase 5'],
-  ['status', 'phase 5'],
-  ['note', 'phase 5'],
   ['ask', 'phase 7'],
 ];
 
