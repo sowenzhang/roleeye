@@ -121,6 +121,35 @@ export class EvaluationRepository {
     return row ? mapRow(row) : undefined;
   }
 
+  /**
+   * The latest evaluation for many jobs, in one query per chunk.
+   *
+   * Archetype classification reads the stored requirements for every eligible
+   * role, and doing that one job at a time made a corpus-sized scan cost a
+   * corpus-sized number of queries.
+   */
+  latestForJobs(jobIds: string[]): Map<string, EvaluationRecord> {
+    const found = new Map<string, EvaluationRecord>();
+    if (jobIds.length === 0) return found;
+
+    for (let index = 0; index < jobIds.length; index += 400) {
+      const chunk = jobIds.slice(index, index + 400);
+      const placeholders = chunk.map(() => '?').join(',');
+
+      const rows = this.db
+        .prepare(
+          `SELECT e.* FROM evaluations e
+           WHERE e.job_id IN (${placeholders})
+             AND e.created_at = (SELECT MAX(created_at) FROM evaluations WHERE job_id = e.job_id)`,
+        )
+        .all(...chunk) as EvaluationRow[];
+
+      for (const row of rows) found.set(row.job_id, mapRow(row));
+    }
+
+    return found;
+  }
+
   save(input: EvaluationInput): EvaluationRecord {
     const id = randomId('eval');
 

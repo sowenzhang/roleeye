@@ -237,6 +237,12 @@ export class FactRepository {
   /**
    * Adds a fact, or reconciles one that already exists.
    *
+   * Identity is the statement *and* the employer it sits under. The same true
+   * sentence can appear under two jobs — "Led a cross-functional platform
+   * migration." is exactly the kind that repeats — and collapsing those into
+   * one row loses the second job's provenance, so a resume ends up citing one
+   * employer for work done at both.
+   *
    * Re-importing an unchanged document must not produce duplicates or reset
    * approvals — that would make import unusable as a routine operation. An
    * edited statement is a different fact by identity, so it arrives as a new
@@ -247,9 +253,36 @@ export class FactRepository {
     const hash = statementHash(statement);
     const timestamp = nowIso();
 
-    const existing = this.db.prepare('SELECT * FROM facts WHERE statement_hash = ?').get(hash) as
-      | FactRow
-      | undefined;
+    const scoped = this.db
+      .prepare(`SELECT * FROM facts WHERE statement_hash = ? AND COALESCE(experience_id, '') = ?`)
+      .get(hash, input.experienceId ?? '') as FactRow | undefined;
+
+    // Adoption, in both directions, so that identity is scoped without
+    // manufacturing twins:
+    //
+    // - an unattached fact that now has an employer is the same fact gaining
+    //   provenance, not a new one;
+    // - a statement arriving without an employer, when exactly one fact
+    //   already carries those words, is that fact rather than a second copy.
+    //
+    // Where it is genuinely ambiguous — the same sentence already recorded
+    // under two employers — nothing is adopted, because picking one would
+    // attribute the work to the wrong job.
+    let adoptable: FactRow | undefined;
+
+    if (!scoped) {
+      const candidates = this.db
+        .prepare(
+          input.experienceId === undefined
+            ? 'SELECT * FROM facts WHERE statement_hash = ?'
+            : 'SELECT * FROM facts WHERE statement_hash = ? AND experience_id IS NULL',
+        )
+        .all(hash) as FactRow[];
+
+      adoptable = candidates.length === 1 ? candidates[0] : undefined;
+    }
+
+    const existing = scoped ?? adoptable;
 
     if (existing) {
       const current = mapFact(existing);

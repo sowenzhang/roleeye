@@ -97,6 +97,9 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-14 | `approvedSetHash` covers tags and employer, not just statements. | Tags decide which facts an archetype draws on. Re-tagging changed the input set while the resume was still reported current. |
 | 2026-08-14 | Build, typecheck and tests run in CI on Ubuntu and Windows. | The suite is hermetic, so it needs no secrets and calls no model. Its most valuable step is `npm ci`: this lockfile was rewritten to point at the public registry from a machine that cannot reach it, and CI is the only place that can prove the rewrite honest. It did, on the first run. |
 | 2026-08-14 | The shipped `criteria.example.yaml` documents every section the schema accepts, and a test enforces it. | The CLI told users to "set reasoning.provider in config/criteria.yaml" while the example that `init` copies had no reasoning block — nor screening, budget, or notify. It still validated, because all four have defaults, which is exactly why nothing caught it. Found while hand-editing that file during Phase 4 live testing. |
+| 2026-08-14 | Fact identity is the statement *and* the employer (migration 006). | The same true sentence under two jobs — "Led a cross-functional platform migration." repeats for a reason — collapsed into one row, and the second job lost its provenance, so a resume cited one employer for work done at both. Adoption still reconciles an unattached fact with the employer a document later supplies, and refuses to guess when the words already sit under two. |
+| 2026-08-14 | A forced reclassification supersedes the manual corrections it overrides, and any fresh write clears that flag. | The manual lookup searched every archetype version, so a correction outranked a deliberate `--force` and the next ordinary run put it back. Fixing that introduced a second bug in the same hour: the superseded flag outlived the row and silently swallowed the *next* correction. Caught by writing the test for the fix rather than by reasoning about it. |
+| 2026-08-14 | Classification batches its reads and writes with one prepared statement. | 601 statements for 100 roles became 4; 1,000 roles now cost 8 statements and 42 ms. The work is a loop over data already held, and it should not cost a multiple of the corpus. |
 
 ## Phase 4 notes
 
@@ -207,14 +210,16 @@ so explicitly in the prompt produced a complete, fully supported resume.
 
 ### Known and deliberately not fixed yet
 
-- `statement_hash` is globally unique, so the same sentence under two employers
-  collapses into one fact and the second provenance is lost. Fixing it means
-  scoping identity to the experience, which is a migration.
-- A `--force` reclassification does not retire an older manual override, so the
-  next normal pass copies it forward.
-- `assignArchetypes` issues roughly six queries per job (601 for 100 jobs;
-  851 ms for 5,000 in memory). It should batch-load and write in one
-  transaction.
+All three were fixed on 2026-08-14, before Phase 5, because two of them needed
+a migration and doing that after Phase 5 adds its own tables is more expensive:
+
+- ~~`statement_hash` is globally unique, so the same sentence under two
+  employers collapses into one fact and the second provenance is lost.~~
+  Migration 006 scopes identity to the employer.
+- ~~A `--force` reclassification does not retire an older manual override.~~
+  Manual rows are superseded.
+- ~~`assignArchetypes` issues roughly six queries per job.~~ Measured after:
+  100 roles in 4 statements, 1,000 roles in 8 statements and 42 ms.
 
 ## Phase 3.5 notes
 

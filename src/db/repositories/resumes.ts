@@ -37,6 +37,7 @@ interface AssignmentRow {
   method: string;
   evidence_json: string;
   assigned_at: string;
+  superseded_at: string | null;
 }
 
 function parseList(value: string): string[] {
@@ -86,7 +87,11 @@ export class ArchetypeAssignmentRepository {
            runner_up_score = excluded.runner_up_score,
            method = excluded.method,
            evidence_json = excluded.evidence_json,
-           assigned_at = excluded.assigned_at`,
+           assigned_at = excluded.assigned_at,
+           -- A fresh write is a live decision. Without this, a row superseded
+           -- by a forced run stayed flagged, so the *next* correction the user
+           -- made was ignored the moment it was written.
+           superseded_at = NULL`,
       )
       .run({
         id,
@@ -120,12 +125,134 @@ export class ArchetypeAssignmentRepository {
     return row ? mapAssignment(row) : undefined;
   }
 
-  /** Manual corrections survive a re-classification; that is their point. */
+  /**
+   * Manual corrections survive a re-classification; that is their point.
+   *
+   * Superseded rows are excluded: a deliberate `--force` reassignment must not
+   * be undone by a correction the user made under an older archetype file.
+   */
   manualForJob(jobId: string): ArchetypeAssignment | undefined {
     const row = this.db
-      .prepare(`SELECT * FROM archetype_assignments WHERE job_id = ? AND method = 'manual' ORDER BY assigned_at DESC LIMIT 1`)
+      .prepare(
+        `SELECT * FROM archetype_assignments
+         WHERE job_id = ? AND method = 'manual' AND superseded_at IS NULL
+         ORDER BY assigned_at DESC LIMIT 1`,
+      )
       .get(jobId) as AssignmentRow | undefined;
     return row ? mapAssignment(row) : undefined;
+  }
+
+  /** Retires manual corrections for a job, without deleting what was said. */
+  supersedeManual(jobIds: string[], at: IsoTimestamp = nowIso()): number {
+    if (jobIds.length === 0) return 0;
+
+    const statement = this.db.prepare(
+      `UPDATE archetype_assignments SET superseded_at = @at
+       WHERE job_id = @jobId AND method = 'manual' AND superseded_at IS NULL`,
+    );
+
+    const run = this.db.transaction((ids: string[]) => {
+      let changed = 0;
+      for (const jobId of ids) changed += statement.run({ jobId, at }).changes;
+      return changed;
+    });
+
+    return run(jobIds);
+  }
+
+  /**
+   * Every live assignment for the given jobs, in one query.
+   *
+   * Classification runs over the whole corpus, so per-job lookups turned a scan
+   * into roughly six queries per role — 601 for 100 jobs. The work is a join
+   * and a loop; it should cost a handful of statements, not a multiple of the
+   * corpus.
+   */
+  loadForJobs(jobIds: string[], archetypeHash: string): {
+    manual: Map<string, ArchetypeAssignment>;
+    current: Map<string, ArchetypeAssignment>;
+  } {
+    const manual = new Map<string, ArchetypeAssignment>();
+    const current = new Map<string, ArchetypeAssignment>();
+
+    if (jobIds.length === 0) return { manual, current };
+
+    // Chunked because SQLite caps bound parameters (999 by default).
+    for (let index = 0; index < jobIds.length; index += 400) {
+      const chunk = jobIds.slice(index, index + 400);
+      const placeholders = chunk.map(() => '?').join(',');
+
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM archetype_assignments
+           WHERE job_id IN (${placeholders})
+             AND (method = 'manual' OR archetype_hash = ?)
+           ORDER BY assigned_at`,
+        )
+        .all(...chunk, archetypeHash) as AssignmentRow[];
+
+      for (const row of rows) {
+        const assignment = mapAssignment(row);
+        if (assignment.method === 'manual' && row.superseded_at === null) {
+          manual.set(assignment.jobId, assignment);
+        }
+        if (assignment.archetypeHash === archetypeHash) {
+          current.set(assignment.jobId, assignment);
+        }
+      }
+    }
+
+    return { manual, current };
+  }
+
+  /**
+   * Writes many assignments in one transaction, with one prepared statement.
+   *
+   * Calling `save` in a loop re-prepared three statements per row, which left
+   * the write side scaling with the corpus even after the reads were batched.
+   */
+  saveAll(inputs: Array<Omit<ArchetypeAssignment, 'id' | 'assignedAt'> & { assignedAt?: IsoTimestamp }>): void {
+    if (inputs.length === 0) return;
+
+    const statement = this.db.prepare(
+      `INSERT INTO archetype_assignments (
+         id, job_id, archetype_id, archetype_hash, score, runner_up_id, runner_up_score,
+         method, evidence_json, assigned_at
+       ) VALUES (
+         @id, @job_id, @archetype_id, @archetype_hash, @score, @runner_up_id, @runner_up_score,
+         @method, @evidence, @assigned_at
+       )
+       ON CONFLICT(job_id, archetype_hash) DO UPDATE SET
+         archetype_id = excluded.archetype_id,
+         score = excluded.score,
+         runner_up_id = excluded.runner_up_id,
+         runner_up_score = excluded.runner_up_score,
+         method = excluded.method,
+         evidence_json = excluded.evidence_json,
+         assigned_at = excluded.assigned_at,
+         superseded_at = NULL`,
+    );
+
+    const now = nowIso();
+
+    const write = this.db.transaction((entries: typeof inputs) => {
+      for (const entry of entries) {
+        statement.run({
+          id: randomId('asg'),
+          job_id: entry.jobId,
+          archetype_id: toDb(entry.archetypeId),
+          archetype_hash: entry.archetypeHash,
+          score: entry.score,
+          runner_up_id: toDb(entry.runnerUpId),
+          runner_up_score: toDb(entry.runnerUpScore),
+          method: entry.method,
+          evidence: JSON.stringify(entry.evidence),
+          assigned_at: entry.assignedAt ?? now,
+        });
+      }
+    });
+
+    write(inputs);
   }
 
   countsByArchetype(archetypeHash: string): { archetypeId: string; count: number }[] {
