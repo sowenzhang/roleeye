@@ -69,11 +69,10 @@ src/evaluate/   hard filters, scoring, advocate/skeptic/judge
 src/reasoning/  LLM provider interface + implementations
 src/resume/     fact store, matching, tailoring, claim validation
 src/applications/ application state machine and history
-src/notifications/ notifier interface + adapters
+src/notify/     notifier interface + adapters (terminal, desktop, webhook)
 src/search/     structured, fulltext, semantic, planner
 src/analytics/  funnel and segment metrics
 src/export/     private/public sanitized export
-src/sync/       VPS sync
 data/         local SQLite database (gitignored, authoritative)
 artifacts/    generated per-job artifacts (gitignored)
 export/       generated export packages (gitignored)

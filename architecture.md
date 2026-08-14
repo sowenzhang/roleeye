@@ -326,7 +326,7 @@ roleeye/
 │  │  ├─ tailor.ts
 │  │  └─ validate-claims.ts
 │  │
-│  ├─ notifications/
+│  ├─ notify/
 │  ├─ applications/
 │  ├─ search/
 │  │  ├─ structured.ts
@@ -336,8 +336,7 @@ roleeye/
 │  │  └─ answer.ts
 │  │
 │  ├─ analytics/
-│  ├─ export/
-│  └─ sync/
+│  └─ export/
 │
 ├─ data/
 │  └─ .gitkeep
@@ -732,7 +731,33 @@ This makes evaluations inspectable and helps later analytics.
 
 # 15. Resume Fact Store
 
-`profile/accomplishments.yaml` is the factual boundary for resume generation.
+Facts are the factual boundary for resume generation: no generated claim exists
+that does not trace to an approved fact.
+
+## Ownership: SQLite holds facts, YAML imports and exports them
+
+`profile/accomplishments.yaml` is a **seed and interchange format, not the store**.
+The store is SQLite (§9: configuration is YAML, state is SQLite).
+
+A fact carries lifecycle state — draft or approved, who approved it and when,
+which document it was imported from, which generated bullets cite it. That is
+state, and a file the user may hand-edit cannot hold it safely: editing the
+statement of an approved fact in a text editor would silently re-approve text no
+one reviewed.
+
+Therefore:
+
+- `roleeye resume import` reads `.docx`, `.pdf`, or `accomplishments.yaml` and
+  writes **draft** facts. Import is explicit and repeatable; re-importing an
+  unchanged statement is a no-op, and a changed statement returns the fact to
+  draft.
+- Approval happens in the database, per experience block (§33 Phase 3a notes:
+  approving 60 atomic facts is a form nobody fills in honestly).
+- `roleeye resume export-facts` writes the YAML back out, so the user keeps a
+  readable, version-controllable copy and nothing is locked in.
+- `profile/accomplishments.example.yaml` remains the authoring template.
+
+The YAML shape below is therefore the import and export format.
 
 Example:
 
@@ -772,26 +797,32 @@ The renderer may remove provenance from the final resume, but `resume-diff.md` s
 
 # 16. Artifact Layout
 
+Resumes are generated per **archetype** (§33 Phase 4), so they do not live under
+a job directory. Per-application deltas do.
+
 ```text
 artifacts/
+  archetypes/
+    <archetype-slug>/
+      resume.md
+      resume.docx
+      resume-diff.md
+      claims.json
   <company-slug>/
     <job-id>/
       evaluation.md
       evaluation.json
-      resume.md
-      resume-diff.md
+      resume-delta.md
       application-answers.md
       interview-notes.md
 ```
 
-Optional future renderings:
+A per-job `resume.md` is written only when the user has produced a delta for
+that posting; it is the archetype resume with the delta applied, never an
+independent generation.
 
-```text
-resume.docx
-resume.pdf
-```
-
-The database should reference artifact paths and checksums.
+The database references artifact paths and checksums, and every generated
+artifact records the inputs that produced it (§33 Phase 4).
 
 ---
 
@@ -1548,15 +1579,91 @@ Resumes are tailored per **role archetype**, not per posting. See `docs/vision.m
 §7: one generation per posting costs 100x more and produces documents the user
 never reads, which is worse for them, not better.
 
+### The archetype classifier has to be built
+
+An earlier version of this phase said archetypes are "mapped from the existing
+role-family classifier". **There is no such classifier.** `src/portal/presets.ts`
+holds `ROLE_FAMILIES`, which compile a user's UI selections into *scope
+configuration* — title terms deciding what to capture. They describe what the
+user wants to see, not what a posting is. The same wrong claim appeared in
+`docs/vision.md` and was corrected there on 2026-08-13; this is the same
+correction applied to the plan.
+
+The classifier is deterministic first, for the same reason screening is:
+
+- each archetype declares title terms, core skills, and exclusions, seeded from
+  `ROLE_FAMILIES` and editable in the portal
+- a posting is scored against every archetype from its title and the
+  requirements Phase 3b already extracted and stored — no new model call, no new
+  spend, and no re-reading of the posting body
+- a clear winner assigns; a tie or a weak best score leaves the posting
+  `unassigned` and the user assigns it, which is also the signal that an
+  archetype is missing
+- a model is consulted only if the user opts in, only to choose between two
+  named archetypes, and never to invent one
+
+### Facts live in SQLite
+
+See §15. `profile/accomplishments.yaml` is an import and export format; the
+store is the database, because approval is lifecycle state and a hand-edited
+file cannot hold it honestly.
+
+### Storage (migration 005)
+
+The `artifacts` table from migration 001 is **rebuilt, not reused**. It predates
+migration 003 and carries the same defect that forced `evaluations` to be
+corrected: it names a job and nothing else, so a generated document cannot be
+attributed to the facts, archetype, profile, or posting content that produced
+it, and cannot be marked stale when any of them changes. Pre-creating it in 001
+was a mistake (see the decisions log, 2026-08-13).
+
+Migration 005 adds:
+
+- `experiences` — an employment block; the unit of approval
+- `facts` — statement, tags, experience, status (`draft` / `approved`),
+  approved_at, statement hash, and the import it came from
+- `fact_imports` — one row per imported document: path, sha256, format, byte
+  size, extractor and version, counts
+- `archetypes` and `archetype_assignments` — assignment carries the score, the
+  method (`deterministic` / `manual` / `model`), and the criteria hash
+- `resume_generations` — archetype, fact ID set hash, profile hash, provider,
+  model, and the resulting artifact
+- `artifacts` gains `archetype_id`, `snapshot_id`, `content_hash`,
+  `generation_id`, and `superseded_at`
+
+### Document import dependencies
+
+Import reads documents the user supplies. Three libraries were tested against
+real files before being chosen:
+
+| Need | Choice | Cost | Status |
+|---|---|---|---|
+| `.docx` read | `mammoth` | 2.1 MB | dependency |
+| `.docx` write | `docx` | 4.4 MB | dependency |
+| `.pdf` text | `pdfjs-dist` | 32.9 MB | **optional peer**, dynamically imported |
+
+`pdfjs-dist` follows the Playwright precedent (§4): a large install most users
+never need, loaded through a dynamic import, with an error that names the fix —
+install it, or export the resume as `.docx`. `.docx` import is the primary path
+and must not require a second install.
+
+A resume is a file of unknown provenance — templates are downloaded, and a PDF
+is a program format. Import therefore obeys §40 as posting text does: the file
+size is bounded before parsing, extracted text is capped, the PDF reader runs
+with `isEvalSupported: false` and no worker or network access, extracted text is
+fenced as untrusted when it reaches a prompt, and no imported byte can name a
+path, a command, or a fact ID.
+
 Build:
 
-- accomplishment fact store
+- accomplishment fact store in SQLite, with YAML import and export
 - `.docx` / `.pdf` resume import producing **draft, unapproved** facts
-- explicit fact approval before any generated use
-- role archetypes (3-6), each mapped from the existing role-family classifier
+- explicit fact approval, per experience block
+- role archetypes (3-6) and the deterministic classifier above
 - one reviewed, tailored resume per archetype, regenerated when the archetype
   changes rather than when a posting arrives
-- per-posting **delta** only: headline, bullet ordering, short cover note
+- per-posting **delta** only, produced on `APPLY`: headline, bullet ordering,
+  short cover note
 - fact-to-requirement matching
 - claim validation
 - resume diff
@@ -1568,6 +1675,11 @@ Acceptance:
 - no unsupported claim can pass validation
 - an imported fact cannot be used until a human approves it
 - evaluating N postings across M archetypes performs M resume generations, not N
+- classification of N postings makes zero model calls by default
+- a generated artifact records the facts, archetype, and profile hash that
+  produced it, and is marked stale when any of them changes
+- an import of a 50 MB or malformed file fails with a stated reason and writes
+  nothing
 
 ---
 
@@ -2142,6 +2254,7 @@ into prompts, into artifacts, and into the portal.
 | Boundary | Requirement |
 |---|---|
 | Parsing | bounded response sizes; bounded description length; no unbounded backtracking in parsing regexes |
+| Document import | bounded file size before parsing; capped extracted text; PDF read with no eval, worker, or network access |
 | Storage | stored as text, never executed or interpolated into SQL |
 | Prompting | delimited and labeled as untrusted data; instructions inside a posting are reported, never obeyed |
 | Model output | schema-validated before persistence; never trusted to name a file path or command |

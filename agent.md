@@ -945,12 +945,11 @@ roleeye/
 │  ├─ normalize/
 │  ├─ evaluate/
 │  ├─ resume/
-│  ├─ notifications/
+│  ├─ notify/
 │  ├─ applications/
 │  ├─ search/
 │  ├─ analytics/
-│  ├─ export/
-│  └─ sync/
+│  └─ export/
 │
 ├─ data/
 │  └─ .gitkeep
