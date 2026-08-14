@@ -40,7 +40,11 @@ export interface GenerationRequest<T> {
   system: string;
   /** The task, with any untrusted content already fenced. */
   prompt: string;
-  schema: z.ZodType<T>;
+  /**
+   * Parsed from unknown, because model output is unknown until validated, and
+   * because schemas with defaults have an input type wider than their output.
+   */
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   /** Names the schema in the prompt and in cache keys. */
   schemaName: string;
   maxOutputTokens?: number | undefined;

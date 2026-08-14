@@ -16,6 +16,10 @@ import type { Paths } from '../config/paths.js';
 export interface ConfigDocument<T> {
   path: string;
   exists: boolean;
+  /** False when the file on disk does not satisfy the schema. */
+  valid: boolean;
+  /** Why it is invalid, so the portal can say so rather than quietly replacing it. */
+  problems: ValidationProblem[];
   value: T;
 }
 
@@ -38,15 +42,36 @@ function issuesOf(error: z.ZodError): ValidationProblem[] {
 function read<T>(file: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>): ConfigDocument<T> {
   if (!existsSync(file)) {
     // A first run has no files yet; defaults let the portal open on something.
-    return { path: file, exists: false, value: schema.parse({}) };
+    return { path: file, exists: false, valid: true, problems: [], value: schema.parse({}) };
   }
 
-  const raw = parse(readFileSync(file, 'utf8')) ?? {};
+  let raw: unknown;
+  try {
+    raw = parse(readFileSync(file, 'utf8')) ?? {};
+  } catch (error) {
+    // Malformed YAML is a user typo, not a portal failure. Report it like any
+    // other problem so the page still opens and explains itself.
+    return {
+      path: file,
+      exists: true,
+      valid: false,
+      problems: [{ path: '(file)', message: error instanceof Error ? error.message.split('\n')[0]! : String(error) }],
+      value: schema.parse({}),
+    };
+  }
+
   const result = schema.safeParse(raw);
 
   // A file the loader would reject still has to be openable, or the portal
-  // becomes useless exactly when it is most needed.
-  return { path: file, exists: true, value: result.success ? result.data : schema.parse({}) };
+  // becomes useless exactly when it is most needed. It is shown as defaults,
+  // but reported as invalid so nobody overwrites real settings unknowingly.
+  return {
+    path: file,
+    exists: true,
+    valid: result.success,
+    problems: result.success ? [] : issuesOf(result.error),
+    value: result.success ? result.data : schema.parse({}),
+  };
 }
 
 function save<T>(file: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, candidate: unknown): SaveResult<T> {

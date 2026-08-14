@@ -151,6 +151,25 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .rowline { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .count { color: var(--faint); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 
+/* Model picker: two columns, never three, and never a boxed feature row. */
+.engines { display: grid; grid-template-columns: repeat(auto-fit, minmax(252px, 1fr)); gap: 10px; }
+.engine {
+  display: grid; gap: 7px; text-align: left; width: 100%; font: inherit; color: var(--text);
+  border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 14px 15px; cursor: pointer;
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease), transform 0.12s var(--ease);
+}
+.engine:hover { border-color: var(--line-strong); }
+.engine:active { transform: scale(0.99); }
+.engine[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-dim); }
+.engine .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.engine b { font-weight: 550; font-size: 14px; letter-spacing: -0.01em; }
+.engine p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.engine .cost { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.engine[aria-pressed="true"] .cost { color: #7fcfae; }
+.tag { font-size: 11px; border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 8px; color: var(--faint); white-space: nowrap; }
+.tag.good { color: var(--accent); border-color: #1d6b4f; }
+.tag.warn { color: var(--warn); border-color: #6b5320; }
+
 details.adv { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
 details.adv summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
 details.adv summary::-webkit-details-marker { display: none; }
@@ -193,6 +212,12 @@ button.ghost:active { transform: scale(0.98); }
 .problems div { color: var(--danger); font-size: 12.5px; }
 
 .empty { color: var(--faint); font-size: 13px; padding: 22px 0; text-align: center; border: 1px dashed var(--line-strong); border-radius: 10px; }
+.alert {
+  max-width: 1180px; margin: 0 auto 4px; padding: 13px 16px; border-radius: 10px;
+  border: 1px solid #6b5320; background: #21190a; color: #f0d9a8; font-size: 13px; line-height: 1.5;
+}
+.alert b { display: block; font-weight: 600; margin-bottom: 3px; }
+.alert:empty { display: none; padding: 0; border: 0; }
 .skeleton { height: 46px; border-radius: 10px; background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 37%, var(--surface) 63%); background-size: 400% 100%; animation: shimmer 1.4s ease-in-out infinite; }
 @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
 
@@ -247,6 +272,10 @@ const state = {
     screeningEnabled: true, captureMode: 'scoped', catalog: [], extraTitles: [], extraExcludes: [],
   },
   filter: '',
+  engines: [],
+  reasoning: { provider: 'none', model: '', passes: 2 },
+  monthlyBudget: 20,
+  detected: null,
 };
 
 function toggle(list, value) {
@@ -349,6 +378,127 @@ function renderRecency() {
   );
 }
 
+function tag(text, kind) {
+  const span = document.createElement('span');
+  span.className = kind ? 'tag ' + kind : 'tag';
+  span.textContent = text;
+  return span;
+}
+
+function costLabel(option) {
+  if (option.provider === 'none') return 'no calls';
+  if (option.local) return 'free, runs here';
+  return '$' + option.estimate.perHundred.toFixed(2) + ' per 100 roles';
+}
+
+function renderEngines() {
+  const host = $('engines');
+  const options = [
+    { id: 'none', provider: 'none', label: 'No model', note: 'Screening, history and scoring rules only. Nothing is sent anywhere, ever.', local: true, keyPresent: true },
+  ].concat(state.engines);
+
+  host.replaceChildren(
+    ...options.map((option) => {
+      const picked = state.reasoning.provider === option.provider && (option.provider === 'none' || state.reasoning.model === option.id);
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'engine';
+      button.setAttribute('aria-pressed', String(picked));
+
+      const top = document.createElement('div');
+      top.className = 'top';
+      const name = document.createElement('b');
+      name.textContent = option.label;
+      top.append(name);
+
+      if (option.local && option.provider !== 'none') top.append(tag('stays local', 'good'));
+      else if (!option.keyPresent) top.append(tag('set ' + option.apiKeyEnv, 'warn'));
+
+      const note = document.createElement('p');
+      note.textContent = option.note;
+
+      const cost = document.createElement('span');
+      cost.className = 'cost';
+      cost.textContent = costLabel(option) + (option.requires ? ' - ' + option.requires : '');
+
+      button.append(top, note, cost);
+      button.onclick = () => {
+        state.reasoning.provider = option.provider;
+        state.reasoning.model = option.provider === 'none' ? state.reasoning.model : option.id;
+        if (option.baseUrl) state.reasoning.base_url = option.baseUrl;
+        if (option.apiKeyEnv) state.reasoning.api_key_env = option.apiKeyEnv;
+        if (option.provider !== 'none') {
+          state.reasoning.pricing = { input_per_mtok: option.inputPerMtok, output_per_mtok: option.outputPerMtok };
+        }
+        render();
+      };
+
+      return button;
+    }),
+  );
+}
+
+function renderPasses() {
+  const host = $('passes');
+  const options = [[2, 'Two passes', 'extract, then judge'], [3, 'Three passes', 'adds an adversarial review']];
+  host.replaceChildren(
+    ...options.map((option) =>
+      chip(option[1], option[2], state.reasoning.passes === option[0], () => { state.reasoning.passes = option[0]; }),
+    ),
+  );
+}
+
+function renderBudget() {
+  const host = $('budget');
+  const options = [0, 5, 20, 50];
+  host.replaceChildren(
+    ...options.map((value) =>
+      chip(value === 0 ? 'No spend' : '$' + value + ' / month', '', state.monthlyBudget === value, () => {
+        state.monthlyBudget = value;
+      }),
+    ),
+  );
+}
+
+function renderEngineNote() {
+  const note = $('engineNote');
+  if (state.reasoning.provider === 'none') {
+    note.textContent = 'No model selected. Scanning, screening and scope rules still work.';
+  } else if (state.detected && state.reasoning.provider === 'ollama' && !state.detected.models.includes(state.reasoning.model)) {
+    note.textContent = state.detected.running
+      ? 'Ollama is running but has not pulled ' + state.reasoning.model + '. Run: ollama pull ' + state.reasoning.model
+      : 'Ollama does not appear to be running on this machine.';
+  } else {
+    note.textContent = 'Runs only when you ask, on roles that pass screening.';
+  }
+}
+
+async function detect() {
+  const note = $('engineNote');
+  note.textContent = 'Looking for a local model...';
+
+  const { payload } = await api('/api/reasoning/detect', { method: 'POST', body: '{}' });
+  state.detected = payload;
+
+  if (!payload.running) {
+    note.textContent = 'No local model server found. Install Ollama to keep everything on this machine.';
+    return;
+  }
+
+  payload.models.forEach((name) => {
+    if (state.engines.some((engine) => engine.id === name)) return;
+    state.engines.push({
+      id: name, provider: 'ollama', label: name, note: 'Installed on this machine and ready to use.',
+      baseUrl: 'http://127.0.0.1:11434/v1', inputPerMtok: 0, outputPerMtok: 0, local: true, keyPresent: true,
+      estimate: { perPosting: 0, perHundred: 0, local: true },
+    });
+  });
+
+  render();
+  note.textContent = 'Found ' + payload.models.length + ' local model(s).';
+}
+
 function renderCatalog() {
   const host = $('catalog');
   const term = state.filter.trim().toLowerCase();
@@ -442,6 +592,10 @@ function render() {
   renderSystems();
   renderRecency();
   renderCatalog();
+  renderEngines();
+  renderPasses();
+  renderBudget();
+  renderEngineNote();
   renderSummary();
   $('remoteOnly').checked = state.selection.remoteOnly;
   $('rejectRelocation').checked = state.selection.rejectRelocation;
@@ -459,15 +613,23 @@ async function save() {
 
   const { ok, payload } = await api('/api/preferences', { method: 'PUT', body: JSON.stringify(state.selection) });
 
+  const engine = await api('/api/reasoning', {
+    method: 'PUT',
+    body: JSON.stringify({
+      reasoning: state.reasoning,
+      budget: { max_cost_per_month_usd: state.monthlyBudget },
+    }),
+  });
+
   const problems = $('problems');
   problems.replaceChildren();
-  (payload.problems || []).forEach((problem) => {
+  (payload.problems || []).concat(engine.payload.problems || []).forEach((problem) => {
     const line = document.createElement('div');
     line.textContent = problem.path + ': ' + problem.message;
     problems.append(line);
   });
 
-  if (ok) {
+  if (ok && engine.ok) {
     status.className = 'status ok';
     status.textContent = 'Saved. Run roleeye scan, or wait for the scheduled run.';
     loadStatus();
@@ -550,6 +712,29 @@ async function preview() {
   host.append(list);
 }
 
+/**
+ * Says so when a file on disk does not load.
+ *
+ * The portal falls back to defaults in that case, so saving would replace real
+ * settings with defaults. The user has to be told before they press save.
+ */
+function showInvalid(invalid) {
+  const host = $('alert');
+  host.replaceChildren();
+  if (invalid.length === 0) return;
+
+  const title = document.createElement('b');
+  title.textContent = 'Showing defaults: ' + invalid.map((entry) => entry.file).join(' and ') + ' could not be read.';
+  host.append(title);
+
+  const detail = document.createElement('span');
+  const first = (invalid[0].problems || [])[0];
+  detail.textContent = first
+    ? first.path + ': ' + first.message + '. Saving now replaces that file with what you see here.'
+    : 'Saving now replaces that file with what you see here.';
+  host.append(detail);
+}
+
 async function loadStatus() {
   const { payload } = await api('/api/status');
   $('statJobs').textContent = payload.jobs;
@@ -557,15 +742,21 @@ async function loadStatus() {
 }
 
 async function load() {
-  const [presets, config, catalog] = await Promise.all([
+  const [presets, config, catalog, reasoning] = await Promise.all([
     api('/api/presets'),
     api('/api/config'),
     api('/api/catalog'),
+    api('/api/reasoning'),
   ]);
 
   state.presets = presets.payload;
   state.catalog = catalog.payload.entries || [];
   state.categories = catalog.payload.categories || {};
+  state.engines = reasoning.payload.models || [];
+  Object.assign(state.reasoning, reasoning.payload.current || {});
+  if (typeof (reasoning.payload.budget || {}).max_cost_per_month_usd === 'number') {
+    state.monthlyBudget = reasoning.payload.budget.max_cost_per_month_usd;
+  }
   Object.assign(state.selection, config.payload.selection || {});
   state.selection.captureMode = config.payload.captureMode || 'scoped';
   state.selection.catalog = state.catalog.filter((e) => e.added).map((e) => e.type + ':' + e.token);
@@ -574,6 +765,7 @@ async function load() {
   $('extraTitles').value = (state.selection.extraTitles || []).join(', ');
   $('extraExcludes').value = (state.selection.extraExcludes || []).join(', ');
   $('paths').textContent = config.payload.locations.criteria;
+  showInvalid(config.payload.invalid || []);
 
   render();
   loadStatus();
@@ -583,6 +775,7 @@ $('search').addEventListener('input', (e) => { state.filter = e.target.value; re
 $('addUrl').onclick = addByUrl;
 $('boardEntry').addEventListener('keydown', (e) => { if (e.key === 'Enter') addByUrl(); });
 $('save').onclick = save;
+$('detect').onclick = detect;
 $('preview').onclick = preview;
 $('remoteOnly').onchange = (e) => { state.selection.remoteOnly = e.target.checked; renderSummary(); };
 $('rejectRelocation').onchange = (e) => { state.selection.rejectRelocation = e.target.checked; };
@@ -604,6 +797,8 @@ export function renderIndex(): string {
   <span class="brand">Role<span>Eye</span></span>
   <span class="tagline">everything stays on this machine</span>
 </header>
+
+<div class="alert" id="alert" role="status"></div>
 
 <div class="shell">
   <main>
@@ -696,6 +891,24 @@ export function renderIndex(): string {
     </section>
 
     <section style="--i:4">
+      <h2>Which model reasons about the shortlist</h2>
+      <p class="hint">Scanning, screening and your rules never call a model. This picks what judges fit on the roles that survive. A local model keeps every posting and your profile on this machine.</p>
+
+      <div class="engines" id="engines"></div>
+
+      <div class="rowline" style="margin-top:14px">
+        <span class="count" id="engineNote"></span>
+        <button class="ghost" id="detect" type="button">Detect local models</button>
+      </div>
+
+      <div class="label">Depth</div>
+      <div class="scale" id="passes"></div>
+
+      <div class="label">Stop spending at</div>
+      <div class="scale" id="budget"></div>
+    </section>
+
+    <section style="--i:5">
       <h2>Check before you commit</h2>
       <p class="hint">Runs your settings against roles already stored. Nothing is written.</p>
       <button class="ghost" id="preview" type="button">Preview against stored roles</button>

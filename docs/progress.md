@@ -12,14 +12,16 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2.5 | Cross-model review; source/job separation (migration 003), closure lifecycle, bug fixes | done |
 | 3a | Criteria engine, hard filters, authenticity screening, backup, scheduling, interactive init | done |
 | 3c | Configuration portal (`roleeye ui`) | done |
-| 3b | Requirement extraction, reasoning provider, evaluation, cache, spend accounting, `evaluate` + `recommend` | in progress |
+| 3b | Requirement extraction, reasoning provider, evaluation, cache, spend accounting, `evaluate` + `recommend` | done |
 | 3.5 | Notifier, daily digest | not started |
-| 4 | Fact store, `.docx`/`.pdf` import as draft facts, tailored resume, claim validation, resume diff, `.docx` output | not started |
-| 5 | Application tracking, state history, notes, recommendation overrides | not started |
+| 4 | Fact store, `.docx`/`.pdf` import as draft facts, **archetype** resumes, claim validation, resume diff, `.docx` output | not started |
+| 5 | Application tracking, state history, notes, recommendation overrides, application question bank | not started |
 | 6 | SQL search, FTS5, funnel + segment analytics, `stats` | not started |
 | 6.5 | Review portal: queue, application timeline, analytics | not started |
 | 7 | Career memory / local RAG | speculative |
 | 8 | Learning loop | speculative |
+| 9 | Windows application shell | planned (see `docs/vision.md`) |
+| 10 | Agent mode — delegate to an installed AI agent | gated on the controls in `docs/vision.md` §6.3 |
 | — | VPS sync and private job site | deferred, not planned |
 
 ## Decisions log
@@ -50,6 +52,58 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-13 | Evaluations reference a snapshot, a content hash, and profile/criteria hashes. | Without them a verdict cannot be attributed to the body that produced it, cannot be marked stale after an edit, and the documented cache key cannot be implemented. |
 | 2026-08-13 | Postings close only after a source run succeeds, and a role closes only when every posting closes. | `closed_at` was previously never set at all. A failed fetch must never retire live roles (architecture.md §30). |
 | 2026-08-13 | The per-scan cap defers unseen roles instead of truncating the fetch. | Truncating stopped refreshing known roles — which would eventually close live jobs — and could hide the same role forever if it sat past the cap in the provider's ordering. |
+| 2026-08-13 | Boilerplate is removed by truncating at terminal headings, not by matching sections. | Measured on 29 live postings: 36% fewer characters, ~490 tokens saved each. A per-section matcher saved 19 tokens of 1,077, because real postings (Ramp) end with a benefits heading followed by *unlabeled* country bullet lists that no heading pattern matches. |
+| 2026-08-13 | Nested configuration objects are `.strict()`. | A mistyped key such as `min_base_salary` was silently dropped, leaving the user believing a hard filter was active when it was not. Found by writing a test that used the wrong field name. |
+| 2026-08-13 | The portal reports an unreadable config file instead of quietly showing defaults. | It falls back to defaults so the page still opens; without a warning, pressing save would replace the user's real settings with those defaults. Malformed YAML also returned an opaque 500. |
+| 2026-08-13 | The page's embedded script is executed in tests against a DOM shim, not merely parsed. | The script is a string inside a `.ts` file, so the compiler never sees it. The first run of this harness immediately caught a `ReferenceError` that typechecking and `node --check` both passed. |
+| 2026-08-13 | Resumes are tailored per role archetype (3-6), not per posting. | 100 postings produced 100 documents the user would never read, under their own name, at 100x the cost. Regeneration is triggered by an archetype changing, not by a posting arriving. |
+| 2026-08-13 | Application answers are classified recalled / composed / never-invented. | "Generate answers automatically" collides with the existing prohibition on inventing legal, demographic and compensation answers. Recall is retrieval of the user's own stated answer; it is not generation. |
+| 2026-08-13 | Agent mode (delegating to an installed `--yolo` agent) is sequenced last and gated. | It is the feature most likely to make the product usable by non-engineers and the one most likely to harm them: postings are attacker-controlled text, and an approval-bypassed agent running as the user turns prompt injection into code execution with that user's privileges. |
+| 2026-08-13 | Posting-derived facts (company, title, location, team) moved *inside* the prompt fence, and field values are newline-stripped. | A cross-model review found they were interpolated outside it. Reproduced: a job title containing newlines escaped the facts block and appeared as a free-standing `SYSTEM:` instruction before the fence began. The poster controls the title. |
+| 2026-08-13 | Model-extracted requirements are fenced too when passed to the assessment pass. | They are a model's reading of attacker text, so an injected instruction can be carried forward into a "structured" field. Structured is not trusted. |
+| 2026-08-13 | Fence markers are neutralised case-insensitively. | Exact-string replacement let `untrusted_job_posting>>>` through untouched, and models match instructions case-insensitively. |
+| 2026-08-13 | Boilerplate truncation requires heading *shape*, not a line prefix. | The prefix rule discarded everything after "Benefits of this microservice architecture include…", losing a work-authorisation requirement that feeds a hard filter. Heading shape keeps the full 36% saving while retaining decision input. |
+| 2026-08-13 | The evaluation cache key includes provider name and pass count. | A two-pass verdict was being served to a user who had since asked for the adversarial third pass, and one model name means different things on different providers. |
+| 2026-08-13 | Portal routes refuse to merge into a config file that does not load. | The portal shows defaults for an unreadable file; merging one panel's edit into those defaults and saving would silently replace every hand-written setting. A UI warning was not sufficient. |
+| 2026-08-13 | **Corrected**: `docs/vision.md` claimed a posting-to-archetype classifier already exists in `src/portal/presets.ts`. It does not. | `presets.ts` compiles UI selections into scope configuration. The classifier is unbuilt work in Phase 4, and recording it as existing would have hidden real scope. |
+
+## Phase 3b notes
+
+The reasoning boundary has one primitive, `generate<T>()`, returning an envelope
+(data, usage, finish reason, model, request id, latency, attempts). It is
+deliberately *not* shaped around the product — there is no `assessJob()` method —
+so a provider cannot quietly acquire product logic, and the whole pipeline can be
+replayed against a scripted provider.
+
+Scoring is computed in code from the model's per-category scores multiplied by
+the user's weights. The model supplies judgement on bounded questions; it never
+supplies the number. Scores are therefore reproducible, and re-weighting does not
+require re-running a model.
+
+### Cost is measured, not estimated
+
+`evaluate --dry-run` prints the exact prompts, the token counts and the price
+before anything is sent. Against live data, one Ramp posting is 1,077 tokens and
+588 after stripping. The portal shows price per 100 roles per model *before* the
+user picks one, because a model choice is a spending decision.
+
+### The model picker exists so "local" is a real option
+
+Selecting Ollama is one click, and `POST /api/reasoning/detect` asks a local
+Ollama which models are actually installed — offering a model the user has not
+pulled is offering a broken choice that would only fail much later, mid-run.
+Choosing a local model means nothing leaves the machine, and the UI says so on
+the card rather than in documentation.
+
+### What live testing changed
+
+- `stripBoilerplate` was rewritten from section matching to truncation (see the
+  decisions log). Section matching saved 19 tokens of 1,077.
+- The dry run claimed "Data leaves this machine: yes" when no provider was
+  configured and nothing would be sent at all.
+- Nested config objects were not strict, so a mistyped hard-filter key was
+  silently ignored.
+- A malformed `criteria.yaml` crashed the portal route with an opaque 500.
 
 ## Phase 3c notes
 

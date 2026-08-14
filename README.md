@@ -17,12 +17,13 @@ the technical design and implementation phases.
 
 ## Status
 
-**Phases 0, 1, 2, 2.5, 3a, and 3c are implemented.**
+**Phases 0, 1, 2, 2.5, 3a, 3b, and 3c are implemented.**
 
-RoleEye currently runs a complete deterministic loop with no model and no spend:
-discover roles, keep permanent history, filter them against your rules, screen
-them for scams, and run itself on a schedule. Configure it in a browser or in a
-terminal — both write the same files.
+RoleEye runs a complete deterministic loop with no model and no spend: discover
+roles, keep permanent history, filter them against your rules, screen them for
+scams, and run itself on a schedule. Add a model and it also evaluates fit,
+explains its reasoning, and accounts for every token. Configure it in a browser
+or in a terminal — both write the same files.
 
 - `roleeye ui` — local configuration portal on `127.0.0.1`
 - `roleeye init --interactive` — the same setup as a terminal interview
@@ -32,13 +33,20 @@ terminal — both write the same files.
 - `roleeye scope test` — preview which roles the scope keeps and drops
 - `roleeye screen` — apply hard filters and authenticity checks
 - `roleeye verify <job-id>` — explain one role, signal by signal
+- `roleeye evaluate` — score fit with a model; `--dry-run` shows cost first
+- `roleeye recommend` — the shortlist, with reasons and concerns
+- `roleeye stats --cost` — what has been spent, by model and by day
 - `roleeye list` / `roleeye show` — query the local record
 - `roleeye schedule install` — run it daily via Task Scheduler or cron
 - `roleeye backup` — snapshot the authoritative database
 
-Not implemented yet: LLM evaluation, resume tailoring, application tracking,
-search, and analytics. Those commands exit with a usage error naming the phase
-that will deliver them. See [`docs/progress.md`](./docs/progress.md).
+Evaluation is optional and off by default. Choosing a local model in the portal
+keeps every posting and your profile on this machine.
+
+Not implemented yet: resume tailoring, application tracking, search, and
+analytics. Those commands exit with a usage error naming the phase that will
+deliver them. See [`docs/progress.md`](./docs/progress.md) for status and
+[`docs/vision.md`](./docs/vision.md) for where this is going.
 
 ## Layout
 
@@ -114,6 +122,9 @@ npm run roleeye -- scan --dry-run
 | `roleeye scope test` | Preview what the scope filter keeps and drops, with reasons |
 | `roleeye screen` | Apply hard filters and authenticity checks; `--force` re-decides |
 | `roleeye verify <job-id>` | Explain one role's screening decision, signal by signal |
+| `roleeye evaluate` | Score fit with a model; `--dry-run` prints the prompts and the cost without sending |
+| `roleeye recommend` | The shortlist with reasons, concerns, and what to verify |
+| `roleeye stats` | Counts by source and decision; `--cost` shows spend by model and day |
 | `roleeye list` | Filter stored jobs by company, title, department, source, country, date |
 | `roleeye show` | Show one job with its sources, history, reposts, and snapshots |
 | `roleeye schedule` | `install`, `status`, or `remove` the daily run; `--print` shows the command |

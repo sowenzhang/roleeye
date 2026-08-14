@@ -1544,16 +1544,22 @@ Acceptance:
 
 ## Phase 4 — Resume + Application Artifacts
 
+Resumes are tailored per **role archetype**, not per posting. See `docs/vision.md`
+§7: one generation per posting costs 100x more and produces documents the user
+never reads, which is worse for them, not better.
+
 Build:
 
 - accomplishment fact store
 - `.docx` / `.pdf` resume import producing **draft, unapproved** facts
 - explicit fact approval before any generated use
+- role archetypes (3-6), each mapped from the existing role-family classifier
+- one reviewed, tailored resume per archetype, regenerated when the archetype
+  changes rather than when a posting arrives
+- per-posting **delta** only: headline, bullet ordering, short cover note
 - fact-to-requirement matching
-- tailored Markdown resume
 - claim validation
 - resume diff
-- application-answer drafts
 - `.docx` rendering of the tailored resume
 
 Acceptance:
@@ -1561,6 +1567,7 @@ Acceptance:
 - every changed factual claim maps to approved fact IDs
 - no unsupported claim can pass validation
 - an imported fact cannot be used until a human approves it
+- evaluating N postings across M archetypes performs M resume generations, not N
 
 ---
 
@@ -1573,6 +1580,14 @@ Build:
 - notes
 - notifier interface
 - daily digest
+- **application question bank** (`docs/vision.md` §8): stored answers reused
+  across employers, split into
+  - *recalled* answers, filled from settings the user already stated
+  - *composed* drafts, generated from approved facts and clearly marked
+  - *never invented* — protected categories stay empty and flagged when the
+    user has not supplied an answer
+- form inspection: read a posting's application form and report which questions
+  it asks beyond the resume
 
 Acceptance:
 
@@ -1582,6 +1597,9 @@ roleeye status JOB123 interviewing
 ```
 
 preserves full history.
+
+- a protected-category question with no stored answer is reported as unanswered,
+  never filled from a similar previous answer
 
 ---
 
@@ -1678,6 +1696,76 @@ Acceptance:
 
 - historical performance is displayed separately from stated preference score
 - system never implies correlation proves causation
+
+---
+
+## Phase 9 — Windows Application Shell
+
+The app is a shell around the CLI, not a rewrite of it. See `docs/vision.md` §3.
+
+Build:
+
+- desktop application hosting the existing portal screens
+- engine selection (local model, hosted model) as a first-run step
+- schedule management through Task Scheduler with a visible next-run time
+- native toast notifications
+- live run log: what was found, what was screened out and by which rule, what
+  was evaluated and what it cost
+- assisted application: open the posting, present the archetype resume and the
+  drafted answers, and stop. The human presses submit.
+- local retrieval service (Phase 7) started with the app
+
+Acceptance:
+
+- every action the app performs is available as a CLI command
+- the app never submits an application
+- a run is fully reconstructable from the local database after the app closes
+
+---
+
+## Phase 10 — Agent Mode (gated)
+
+Delegating reasoning to an AI agent already installed on the machine
+(Copilot CLI, Claude Code, and similar). **Do not build this before the controls
+in `docs/vision.md` §6.3 exist**, and do not treat that section as advisory.
+
+Split into two features with different risk profiles (`docs/vision.md` §6.3a).
+Merging them is what makes this indefensible:
+
+- **10a — agent as reasoner.** No shell, no browser, no filesystem; schema-only
+  output. This is another `ReasoningProvider` and carries roughly model-mode
+  risk.
+- **10b — application assistant.** Narrow browser automation with typed
+  capabilities (`readQuestion`, `setField`, `uploadApprovedArtifact`) and no
+  general shell. A general-purpose coding agent must not be the security
+  boundary for browser automation.
+
+The hazard, stated once more because it is easy to lose: job postings are
+attacker-controlled text, and an approval-bypassed agent running as the user
+turns a prompt injection into code execution with that user's privileges.
+Structured fields are *not* trusted fields — titles, company names,
+model-extracted requirements, form questions and the RAG index all carry
+attacker-chosen content.
+
+Build, in this order:
+
+- structured-record handoff, with every field treated as untrusted
+- a dedicated agent workspace, with junction and symlink escapes blocked
+- a sandbox (AppContainer/LPAC or disposable VM) rather than a second user
+  account, which is often prohibited on managed devices and does not inherit the
+  agent's authentication
+- per-task approval, with approval bypass opt-in and described in plain language
+- a recorded, visible transcript, treated as detective evidence and protected as
+  PII
+- workspace-scoped writes and refused egress, including DNS, git, browser
+  navigation and the local RAG service
+
+Acceptance:
+
+- a posting containing embedded instructions cannot cause a filesystem write
+  outside the agent workspace, demonstrated by an actual adversarial fixture
+- approval bypass is never the shipped default
+- disabling agent mode returns the system to a fully functional model-mode tool
 
 ---
 

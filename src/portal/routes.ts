@@ -8,6 +8,7 @@ import { jobBoardUrl } from '../discovery/ashby.js';
 import { createHttpClient } from '../discovery/http.js';
 import { parseBoardEntry } from '../cli/setup.js';
 import { CATALOG, CATEGORY_LABELS, catalogEntryToSource } from './catalog.js';
+import { estimateCost, MODEL_OPTIONS, type ModelOption } from './models.js';
 import {
   APPLICATION_SYSTEMS,
   compileSelection,
@@ -43,6 +44,34 @@ function ok(json: unknown): RouteResult {
 
 function badRequest(json: unknown): RouteResult {
   return { status: 400, json };
+}
+
+/**
+ * Refuses to merge into a file that does not currently load.
+ *
+ * An unreadable file is shown in the portal as defaults so the page still
+ * opens. Merging a partial edit into those defaults and saving would replace
+ * every setting the user had written by hand with a default value, silently and
+ * irreversibly. Editing one panel must never be able to do that.
+ */
+function blockedByInvalidConfig(deps: RouteDependencies): RouteResult | undefined {
+  const criteria = deps.config.readCriteria();
+  const sources = deps.config.readSources();
+  const broken = [
+    ...(criteria.valid ? [] : [{ file: 'criteria.yaml', path: criteria.path, problems: criteria.problems }]),
+    ...(sources.valid ? [] : [{ file: 'sources.yaml', path: sources.path, problems: sources.problems }]),
+  ];
+
+  if (broken.length === 0) return undefined;
+
+  return badRequest({
+    saved: false,
+    reason:
+      `${broken.map((entry) => entry.file).join(' and ')} cannot be read, so saving would overwrite ` +
+      'settings that are not shown here. Fix or delete the file first.',
+    invalid: broken,
+    problems: broken.flatMap((entry) => entry.problems),
+  });
 }
 
 /**
@@ -96,6 +125,34 @@ async function checkBoard(entry: string, deps: RouteDependencies): Promise<Route
   }
 }
 
+/**
+ * Asks a local Ollama which models are actually installed.
+ *
+ * Offering a model the user has not pulled is offering a broken choice, and the
+ * failure would only surface much later during a real evaluation.
+ */
+async function detectLocalModels(): Promise<RouteResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2_000);
+
+  try {
+    // Fixed loopback address: nothing here is user-controlled, so no SSRF surface.
+    const response = await fetch('http://127.0.0.1:11434/api/tags', { signal: controller.signal });
+    if (!response.ok) return ok({ running: false, models: [] });
+
+    const payload = (await response.json()) as { models?: Array<{ name?: unknown; size?: unknown }> };
+    const models = (payload.models ?? [])
+      .map((model) => (typeof model.name === 'string' ? model.name : ''))
+      .filter((name) => name.length > 0);
+
+    return ok({ running: true, models });
+  } catch {
+    return ok({ running: false, models: [] });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function createRoutes(deps: RouteDependencies): Record<string, RouteHandler> {
   return {
     'GET /api/config': () => {
@@ -111,6 +168,10 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
         ),
         captureMode: sources.value.discovery?.capture_mode ?? 'scoped',
         exists: { criteria: criteria.exists, sources: sources.exists },
+        invalid: [
+          ...(criteria.valid ? [] : [{ file: 'criteria.yaml', problems: criteria.problems }]),
+          ...(sources.valid ? [] : [{ file: 'sources.yaml', problems: sources.problems }]),
+        ],
         locations: deps.config.locations(),
       });
     },
@@ -145,6 +206,9 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
 
     /** Saves picked options by compiling them into scope and criteria. */
     'PUT /api/preferences': ({ body }) => {
+      const blocked = blockedByInvalidConfig(deps);
+      if (blocked) return blocked;
+
       const selection = body as Parameters<typeof compileSelection>[0];
       const compiled = compileSelection(selection);
 
@@ -173,6 +237,52 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
       if (!savedCriteria.ok) return badRequest({ saved: false, problems: savedCriteria.problems });
 
       return ok({ saved: true, sources: savedSources.path, criteria: savedCriteria.path });
+    },
+
+    /**
+     * What model runs the reasoning, and what that costs.
+     *
+     * Key presence is reported, never the key itself: knowing whether the
+     * variable is set is what the user needs; the value is not ours to show.
+     */
+    'GET /api/reasoning': () => {
+      const criteria = deps.config.readCriteria().value as Record<string, any>;
+      const reasoning = criteria['reasoning'] ?? {};
+      const budget = criteria['budget'] ?? {};
+      const passes = reasoning.passes ?? 2;
+
+      return ok({
+        current: reasoning,
+        budget,
+        models: MODEL_OPTIONS.map((option: ModelOption) => ({
+          ...option,
+          keyPresent: option.apiKeyEnv === undefined || (process.env[option.apiKeyEnv] ?? '').length > 0,
+          estimate: estimateCost(option, passes),
+        })),
+      });
+    },
+
+    'POST /api/reasoning/detect': () => detectLocalModels(),
+
+    /** Writes only the reasoning and budget keys, leaving the rest of criteria alone. */
+    'PUT /api/reasoning': ({ body }) => {
+      const blocked = blockedByInvalidConfig(deps);
+      if (blocked) return blocked;
+
+      const payload = (body ?? {}) as { reasoning?: unknown; budget?: unknown };
+      const criteria = deps.config.readCriteria().value as Record<string, any>;
+
+      if (payload.reasoning !== undefined) {
+        criteria['reasoning'] = { ...criteria['reasoning'], ...(payload.reasoning as Record<string, unknown>) };
+      }
+      if (payload.budget !== undefined) {
+        criteria['budget'] = { ...criteria['budget'], ...(payload.budget as Record<string, unknown>) };
+      }
+
+      const result = deps.config.saveCriteria(criteria);
+      return result.ok
+        ? ok({ saved: true, path: result.path, reasoning: (result.value as Record<string, any>)['reasoning'] })
+        : badRequest({ saved: false, problems: result.problems });
     },
 
     'PUT /api/config/criteria': ({ body }) => {

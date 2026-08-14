@@ -2,8 +2,10 @@ import { ExitCode } from '../util/errors.js';
 import { addCommand } from './add.js';
 import { backupCommand } from './backup.js';
 import { doctorCommand } from './doctor.js';
+import { evaluateCommand } from './evaluate.js';
 import { initCommand } from './init.js';
 import { listCommand } from './list.js';
+import { recommendCommand, statsCommand } from './recommend.js';
 import { scanCommand } from './scan.js';
 import { scheduleCommand } from './schedule.js';
 import { scopeCommand } from './scope.js';
@@ -21,9 +23,12 @@ export const commands: readonly Command[] = [
   addCommand,
   scopeCommand,
   screenCommand,
+  evaluateCommand,
+  recommendCommand,
   verifyCommand,
   listCommand,
   showCommand,
+  statsCommand,
   scheduleCommand,
   backupCommand,
 ];
@@ -35,13 +40,10 @@ export function findCommand(name: string | undefined): Command | undefined {
 
 /** Commands documented in agent.md that later phases will implement. */
 const PLANNED: ReadonlyArray<readonly [string, string]> = [
-  ['evaluate', 'phase 3b'],
-  ['recommend', 'phase 3b'],
   ['resume', 'phase 4'],
   ['apply-record', 'phase 5'],
   ['status', 'phase 5'],
   ['note', 'phase 5'],
-  ['stats', 'phase 6'],
   ['ask', 'phase 7'],
 ];
 

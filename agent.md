@@ -133,6 +133,23 @@ The agent may recommend `APPLY`, `MAYBE`, or `SKIP`.
 
 The agent may generate a tailored resume and draft application answers.
 
+The agent may fill in an application form and present it, completed, for review.
+It may not press submit. Filling the form is assistance; submitting it is an
+assertion made under the user's name that they cannot retract, and it is where a
+human absorbs the consequences of every upstream failure — a mis-parsed salary,
+an unscreened fraudulent posting, an injected instruction. See `docs/vision.md`
+§6.4.
+
+Application answers fall into three classes, and the distinction is binding:
+
+- **Recalled** — the user already stated it in their profile or settings. The
+  agent retrieves it. This is not generation.
+- **Composed** — an open question such as "why this company". The agent may
+  draft it from approved facts, marked as a draft and editable before use.
+- **Never invented** — the protected categories below. If the user has not
+  supplied an answer, the field stays empty and is flagged for them. It is never
+  guessed and never inferred from a similar previous answer.
+
 The agent must **not**:
 
 - submit an application

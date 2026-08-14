@@ -285,6 +285,100 @@ describe('portal routes', () => {
 
     assert.equal(result?.status, 400);
   });
+
+  it('refuses to merge into a config file it could not read', async () => {
+    const { routes, service } = harness();
+
+    // A file the schema rejects: the portal shows defaults, so a merge-and-save
+    // would replace every hand-written setting with a default.
+    const file = service.locations().criteria;
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, 'weights:\n  career_direction: 20\n  not_a_real_weight: 80\n');
+
+    const result = await routes['PUT /api/reasoning']?.({
+      method: 'PUT',
+      pathname: '/api/reasoning',
+      query: new URLSearchParams(),
+      body: { reasoning: { provider: 'ollama', model: 'qwen2.5:14b' } },
+      logger: silentLogger,
+    });
+
+    assert.equal(result?.status, 400);
+    assert.match(String((result?.json as { reason: string }).reason), /overwrite/i);
+    assert.match(readFileSync(file, 'utf8'), /not_a_real_weight/, 'the file must be left exactly as it was');
+  });
+
+  it('offers a model list with costs and no secrets in it', async () => {
+    const { routes } = harness();
+
+    const result = await routes['GET /api/reasoning']?.({
+      method: 'GET',
+      pathname: '/api/reasoning',
+      query: new URLSearchParams(),
+      body: undefined,
+      logger: silentLogger,
+    });
+
+    assert.equal(result?.status, 200);
+    const json = result?.json as {
+      models: Array<{ id: string; local: boolean; keyPresent: boolean; estimate: { perHundred: number } }>;
+    };
+
+    assert.ok(json.models.some((model) => model.local), 'a local option must always be offered');
+    assert.ok(json.models.some((model) => !model.local && model.estimate.perHundred > 0), 'hosted options state a price');
+
+    const serialized = JSON.stringify(json);
+    assert.ok(!/sk-[A-Za-z0-9]/.test(serialized), 'no key material may reach the browser');
+  });
+
+  it('changes the model without disturbing the rest of the criteria', async () => {
+    const { routes, service } = harness();
+
+    // Something the user configured earlier that the model panel knows nothing about.
+    const seeded = service.saveCriteria({
+      decision_thresholds: { apply: 91, maybe: 70 },
+      hard_filters: { minimum_base_salary: { amount: 210_000, currency: 'USD' } },
+    });
+    assert.equal(seeded.ok, true);
+
+    const result = await routes['PUT /api/reasoning']?.({
+      method: 'PUT',
+      pathname: '/api/reasoning',
+      query: new URLSearchParams(),
+      body: {
+        reasoning: { provider: 'ollama', model: 'qwen2.5:14b', base_url: 'http://127.0.0.1:11434/v1', passes: 3 },
+        budget: { max_cost_per_month_usd: 5 },
+      },
+      logger: silentLogger,
+    });
+
+    assert.equal(result?.status, 200);
+
+    const reloaded = criteriaSchema.parse(parse(readFileSync(service.locations().criteria, 'utf8')));
+    assert.equal(reloaded.reasoning.provider, 'ollama');
+    assert.equal(reloaded.reasoning.passes, 3);
+    assert.equal(reloaded.budget.max_cost_per_month_usd, 5);
+    assert.equal(reloaded.decision_thresholds.apply, 91, 'unrelated settings survive a model change');
+    assert.equal(reloaded.hard_filters.minimum_base_salary?.amount, 210_000);
+    assert.equal(reloaded.budget.max_jobs_per_scan, 40, 'unset budget fields keep their value');
+  });
+
+  it('reports a missing local model server rather than hanging', async () => {
+    const { routes } = harness();
+
+    const result = await routes['POST /api/reasoning/detect']?.({
+      method: 'POST',
+      pathname: '/api/reasoning/detect',
+      query: new URLSearchParams(),
+      body: {},
+      logger: silentLogger,
+    });
+
+    assert.equal(result?.status, 200);
+    const json = result?.json as { running: boolean; models: string[] };
+    assert.equal(typeof json.running, 'boolean');
+    assert.ok(Array.isArray(json.models));
+  });
 });
 
 describe('generated criteria', () => {

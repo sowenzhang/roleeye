@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { budgetSchema, screeningSchema, unknownHandlingSchema } from './screening-schema.js';
+import { reasoningSchema } from './reasoning-schema.js';
 
 const weightSchema = z.number().int().min(0).max(100);
 
@@ -12,6 +13,7 @@ export const criteriaSchema = z
         apply: z.number().min(0).max(100).default(78),
         maybe: z.number().min(0).max(100).default(62),
       })
+      .strict()
       .default({ apply: 78, maybe: 62 }),
     weights: z
       .object({
@@ -23,6 +25,8 @@ export const criteriaSchema = z
         location: weightSchema.default(10),
         compensation: weightSchema.default(10),
       })
+      // Strict: an unrecognised weight would silently carry zero influence.
+      .strict()
       .default({
         career_direction: 20,
         hands_on: 15,
@@ -36,7 +40,7 @@ export const criteriaSchema = z
       .object({
         countries: z.array(z.string()).default([]),
         require_us_payroll: z.boolean().default(false),
-        relocation: z.object({ reject_if_required: z.boolean().default(true) }).default({
+        relocation: z.object({ reject_if_required: z.boolean().default(true) }).strict().default({
           reject_if_required: true,
         }),
         minimum_base_salary: z
@@ -44,10 +48,13 @@ export const criteriaSchema = z
             amount: z.number().nonnegative(),
             currency: z.string().default('USD'),
           })
+          .strict()
           .optional(),
         /** What a filter does when the posting does not state the fact it needs. */
         on_unknown: unknownHandlingSchema,
       })
+      // Strict: a mistyped filter key is a rule the user believes is active and is not.
+      .strict()
       .default({
         countries: [],
         require_us_payroll: false,
@@ -56,18 +63,21 @@ export const criteriaSchema = z
       }),
     screening: screeningSchema,
     budget: budgetSchema,
+    reasoning: reasoningSchema,
     penalties: z.record(z.union([z.number(), z.record(z.number())])).default({}),
     preferences: z
       .object({
-        work_arrangement: z.object({ preferred: z.array(z.string()).default([]) }).default({ preferred: [] }),
-        application_system: z.object({ deny: z.array(z.string()).default([]) }).default({ deny: [] }),
+        work_arrangement: z.object({ preferred: z.array(z.string()).default([]) }).strict().default({ preferred: [] }),
+        application_system: z.object({ deny: z.array(z.string()).default([]) }).strict().default({ deny: [] }),
         direction: z
           .object({
             positive: z.array(z.string()).default([]),
             negative: z.array(z.string()).default([]),
           })
+          .strict()
           .default({ positive: [], negative: [] }),
       })
+      .strict()
       .default({
         work_arrangement: { preferred: [] },
         application_system: { deny: [] },
