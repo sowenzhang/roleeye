@@ -360,7 +360,7 @@ describe('portal routes', () => {
     assert.equal(reloaded.budget.max_cost_per_month_usd, 5);
     assert.equal(reloaded.decision_thresholds.apply, 91, 'unrelated settings survive a model change');
     assert.equal(reloaded.hard_filters.minimum_base_salary?.amount, 210_000);
-    assert.equal(reloaded.budget.max_jobs_per_scan, 40, 'unset budget fields keep their value');
+    assert.equal(reloaded.budget.max_jobs_per_scan, 5, 'unset budget fields keep their value');
   });
 
   it('reports a missing local model server rather than hanging', async () => {

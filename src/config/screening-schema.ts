@@ -48,14 +48,22 @@ export type ScreeningConfig = z.infer<typeof screeningSchema>;
 
 export const budgetSchema = z
   .object({
-    max_jobs_per_scan: z.number().int().positive().default(40),
+    /**
+     * Roles evaluated per run.
+     *
+     * Five by default: an agent CLI takes minutes per role, so a small daily
+     * run that finishes is worth more than a large one the user cancels. There
+     * is no maximum — the user may set any number — but the CLI and the portal
+     * warn past 20, where a daily run becomes an overnight job.
+     */
+    max_jobs_per_scan: z.number().int().positive().default(5),
     max_cost_per_scan_usd: z.number().nonnegative().default(1),
     max_cost_per_month_usd: z.number().nonnegative().default(20),
     on_exhausted: z.enum(['stop', 'warn']).default('stop'),
   })
   .strict()
   .default({
-    max_jobs_per_scan: 40,
+    max_jobs_per_scan: 5,
     max_cost_per_scan_usd: 1,
     max_cost_per_month_usd: 20,
     on_exhausted: 'stop',

@@ -275,6 +275,7 @@ const state = {
   engines: [],
   reasoning: { provider: 'none', model: '', passes: 2 },
   monthlyBudget: 20,
+  dailyLimit: 5,
   detected: null,
 };
 
@@ -452,6 +453,30 @@ function renderPasses() {
   );
 }
 
+function renderDaily() {
+  const host = $('daily');
+  const options = [3, 5, 10, 20, 40];
+  host.replaceChildren(
+    ...options.map((value) =>
+      chip(String(value) + ' roles', '', state.dailyLimit === value, () => { state.dailyLimit = value; }),
+    ),
+  );
+
+  const warn = $('dailyWarning');
+  const minutes = state.reasoning.provider === 'agent-cli' ? 3.5 * (state.reasoning.passes || 2) : 0.2;
+  if (state.dailyLimit > 20) {
+    const hours = (state.dailyLimit * minutes) / 60;
+    warn.textContent =
+      state.dailyLimit + ' roles is a long run: roughly ' +
+      (hours >= 1 ? hours.toFixed(1) + ' hours' : Math.round(hours * 60) + ' minutes') +
+      ' with the engine you picked.';
+    warn.className = 'status bad';
+  } else {
+    warn.textContent = '';
+    warn.className = 'status';
+  }
+}
+
 function renderBudget() {
   const host = $('budget');
   const options = [0, 5, 20, 50];
@@ -597,6 +622,7 @@ function render() {
   renderCatalog();
   renderEngines();
   renderPasses();
+  renderDaily();
   renderBudget();
   renderEngineNote();
   renderSummary();
@@ -620,7 +646,7 @@ async function save() {
     method: 'PUT',
     body: JSON.stringify({
       reasoning: state.reasoning,
-      budget: { max_cost_per_month_usd: state.monthlyBudget },
+      budget: { max_cost_per_month_usd: state.monthlyBudget, max_jobs_per_scan: state.dailyLimit },
     }),
   });
 
@@ -759,6 +785,9 @@ async function load() {
   Object.assign(state.reasoning, reasoning.payload.current || {});
   if (typeof (reasoning.payload.budget || {}).max_cost_per_month_usd === 'number') {
     state.monthlyBudget = reasoning.payload.budget.max_cost_per_month_usd;
+  }
+  if (typeof (reasoning.payload.budget || {}).max_jobs_per_scan === 'number') {
+    state.dailyLimit = reasoning.payload.budget.max_jobs_per_scan;
   }
   Object.assign(state.selection, config.payload.selection || {});
   state.selection.captureMode = config.payload.captureMode || 'scoped';
@@ -906,6 +935,10 @@ export function renderIndex(): string {
 
       <div class="label">Depth</div>
       <div class="scale" id="passes"></div>
+
+      <div class="label">Roles to evaluate per run</div>
+      <div class="scale" id="daily"></div>
+      <div class="status" id="dailyWarning"></div>
 
       <div class="label">Stop spending at</div>
       <div class="scale" id="budget"></div>

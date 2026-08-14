@@ -3,6 +3,8 @@ import type { Repositories } from '../db/repositories/index.js';
 import type { JobRecord } from '../db/repositories/jobs.js';
 import { Evaluator } from '../evaluate/evaluator.js';
 import { BudgetGuard } from '../evaluate/budget.js';
+import { largeRunWarning, rankForEvaluation, type RankedJob } from '../evaluate/priority.js';
+import { criteriaHash as criteriaHashOf } from '../evaluate/criteria.js';
 import { createProvider, describeProvider, isLocalProvider } from '../reasoning/registry.js';
 import { truncate } from '../normalize/text.js';
 import { flagBool, flagNumber, flagString } from './args.js';
@@ -61,11 +63,26 @@ export const evaluateCommand: Command = {
       return describeDryRun(context, evaluator, job, config);
     }
 
-    const jobs = reference ? [resolveJob(repos, reference)] : eligibleJobs(repos, flagNumber(context.args, 'limit') ?? 25);
+    const limit = flagNumber(context.args, 'limit') ?? config.criteria.budget.max_jobs_per_scan;
+    const candidates = reference ? [] : rankEligible(repos, config);
+    const jobs = reference ? [resolveJob(repos, reference)] : candidates.slice(0, limit).map((entry) => entry.job);
 
     if (jobs.length === 0) {
       printLine(context, 'Nothing eligible to evaluate. Run `roleeye screen` first.');
       return ExitCode.Ok;
+    }
+
+    if (!reference) {
+      const minutes = minutesPerRole(config.criteria.reasoning);
+      const warning = minutes === undefined ? undefined : largeRunWarning(limit, minutes);
+      if (warning) {
+        printLine(context, warning);
+        printLine(context, 'Lower it with --limit, or set budget.max_jobs_per_scan.');
+        printLine(context);
+      }
+
+      printLine(context, `Evaluating the ${jobs.length} highest-priority role(s) of ${candidates.length} eligible.`);
+      printLine(context);
     }
 
     const force = flagBool(context.args, 'force');
@@ -116,8 +133,35 @@ export const evaluateCommand: Command = {
   },
 };
 
-function eligibleJobs(repos: Repositories, limit: number): JobRecord[] {
-  return repos.jobs.list({ inScope: true, limit });
+/**
+ * The roles most likely to repay an expensive call, best first.
+ *
+ * The cap exists so a daily run finishes. Ordering exists so the cap keeps the
+ * best roles rather than whichever ones the database happened to return first.
+ * One function produces the candidate set so the count the user is shown and
+ * the list actually evaluated can never disagree.
+ */
+function rankEligible(repos: Repositories, config: ReturnType<CommandContext['loadConfig']>): RankedJob[] {
+  const criteriaHash = criteriaHashOf(config.criteria);
+  const screeningFor = (jobId: string) => repos.screenings.findCurrent(jobId, criteriaHash);
+
+  const candidates = repos.jobs
+    .list({ inScope: true, limit: 500 })
+    // A role the screener rejected is not a candidate; an unscreened one still is.
+    .filter((job) => screeningFor(job.id)?.eligible !== false);
+
+  return rankForEvaluation(candidates, screeningFor);
+}
+
+/**
+ * Measured: an agent CLI takes minutes per role, an API a few seconds.
+ *
+ * Undefined when nothing is configured, because an estimate of how long it
+ * would take to do nothing is not information.
+ */
+function minutesPerRole(reasoning: { provider: string; passes: number }): number | undefined {
+  if (reasoning.provider === 'none') return undefined;
+  return (reasoning.provider === 'agent-cli' ? 3.5 : 0.1) * reasoning.passes;
 }
 
 function describeOutcome(job: JobRecord, result: { outcome: string; evaluation?: { decision: string; score: number } | undefined; detail?: string | undefined }): string {
