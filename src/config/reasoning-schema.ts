@@ -11,8 +11,18 @@ import { z } from 'zod';
 export const reasoningSchema = z
   .object({
     /** `none` disables evaluation entirely; screening still works. */
-    provider: z.enum(['none', 'openai', 'ollama', 'custom']).default('none'),
+    provider: z.enum(['none', 'openai', 'ollama', 'custom', 'agent-cli']).default('none'),
     model: z.string().default('gpt-5-mini'),
+    /**
+     * The agent CLI to invoke for `agent-cli`.
+     *
+     * A bare executable name resolved on PATH, never a shell string: this is
+     * passed to execFile without a shell, so it cannot carry arguments.
+     */
+    command: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9._-]*$/i, 'command must be a plain executable name, such as "copilot"')
+      .default('copilot'),
     /** Required for `ollama` and `custom`; defaulted for `openai`. */
     base_url: z.string().url().optional(),
     /** Environment variable holding the key. The key itself is never stored here. */
@@ -36,6 +46,7 @@ export const reasoningSchema = z
   .default({
     provider: 'none',
     model: 'gpt-5-mini',
+    command: 'copilot',
     api_key_env: 'OPENAI_API_KEY',
     passes: 2,
     max_output_tokens: 1600,

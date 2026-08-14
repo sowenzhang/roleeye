@@ -1699,57 +1699,57 @@ Acceptance:
 
 ---
 
-## Phase 9 — Windows Application Shell
+## Phase 9 — Desktop Application Shell (Tauri)
 
-The app is a shell around the CLI, not a rewrite of it. See `docs/vision.md` §3.
+The app is a shell around the CLI, not a rewrite of it (`docs/vision.md` §3).
+Tauri loads the existing portal over `127.0.0.1` and runs the Node CLI as a
+sidecar, so the no-bundler constraint holds and there is one UI implementation.
 
 Build:
 
-- desktop application hosting the existing portal screens
-- engine selection (local model, hosted model) as a first-run step
-- schedule management through Task Scheduler with a visible next-run time
+- Tauri shell pointing at the portal, with the CLI as a managed sidecar
+- engine selection as a first-run step (agent CLI, local model, or API key)
+- schedule management with a visible next-run time
 - native toast notifications
 - live run log: what was found, what was screened out and by which rule, what
-  was evaluated and what it cost
+  was evaluated and what it consumed
 - assisted application: open the posting, present the archetype resume and the
   drafted answers, and stop. The human presses submit.
-- local retrieval service (Phase 7) started with the app
 
 Acceptance:
 
 - every action the app performs is available as a CLI command
 - the app never submits an application
 - a run is fully reconstructable from the local database after the app closes
+- Phase 7 (local RAG) is optional at runtime, never a hard dependency
+
+Open: whether the sidecar bundles a Node runtime or requires an installed one.
 
 ---
 
-## Phase 10 — Agent Mode (gated)
+## Phase 10 — Tool-Using Agent Mode (gated)
 
-Delegating reasoning to an AI agent already installed on the machine
-(Copilot CLI, Claude Code, and similar). **Do not build this before the controls
-in `docs/vision.md` §6.3 exist**, and do not treat that section as advisory.
+**Phase 10a (agent as reasoner) shipped with Phase 3b.** An agent CLI invoked
+with `--deny-tool=all --disable-builtin-mcps --no-custom-instructions` has the
+blast radius of an API call: it reads text and returns text. No approval bypass
+is required, because a reasoner does not act.
 
-Split into two features with different risk profiles (`docs/vision.md` §6.3a).
-Merging them is what makes this indefensible:
+What remains gated is the agent that *acts*:
 
-- **10a — agent as reasoner.** No shell, no browser, no filesystem; schema-only
-  output. This is another `ReasoningProvider` and carries roughly model-mode
-  risk.
 - **10b — application assistant.** Narrow browser automation with typed
   capabilities (`readQuestion`, `setField`, `uploadApprovedArtifact`) and no
   general shell. A general-purpose coding agent must not be the security
   boundary for browser automation.
 
-The hazard, stated once more because it is easy to lose: job postings are
-attacker-controlled text, and an approval-bypassed agent running as the user
-turns a prompt injection into code execution with that user's privileges.
-Structured fields are *not* trusted fields — titles, company names,
-model-extracted requirements, form questions and the RAG index all carry
-attacker-chosen content.
+Do not build 10b before the controls in `docs/vision.md` §6.3 exist, and do not
+treat that section as advisory. Job postings are attacker-controlled text, and
+an approval-bypassed agent running as the user turns a prompt injection into
+code execution with that user's privileges. Structured fields are *not* trusted
+fields — titles, company names, model-extracted requirements, form questions and
+the RAG index all carry attacker-chosen content.
 
 Build, in this order:
 
-- structured-record handoff, with every field treated as untrusted
 - a dedicated agent workspace, with junction and symlink escapes blocked
 - a sandbox (AppContainer/LPAC or disposable VM) rather than a second user
   account, which is often prohibited on managed devices and does not inherit the
@@ -1765,7 +1765,7 @@ Acceptance:
 - a posting containing embedded instructions cannot cause a filesystem write
   outside the agent workspace, demonstrated by an actual adversarial fixture
 - approval bypass is never the shipped default
-- disabling agent mode returns the system to a fully functional model-mode tool
+- disabling 10b returns the system to a fully functional reasoner-only tool
 
 ---
 

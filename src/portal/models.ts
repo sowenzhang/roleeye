@@ -11,12 +11,14 @@
 
 export interface ModelOption {
   id: string;
-  provider: 'openai' | 'ollama' | 'custom';
+  provider: 'openai' | 'ollama' | 'custom' | 'agent-cli';
   label: string;
   /** What this choice means for the user, in their terms, not ours. */
   note: string;
   baseUrl?: string;
   apiKeyEnv?: string;
+  /** Executable name for `agent-cli`. */
+  command?: string;
   inputPerMtok: number;
   outputPerMtok: number;
   /** Local models never leave the machine. */
@@ -26,6 +28,17 @@ export interface ModelOption {
 }
 
 export const MODEL_OPTIONS: ModelOption[] = [
+  {
+    id: 'copilot',
+    provider: 'agent-cli',
+    label: 'GitHub Copilot CLI',
+    note: 'Uses the Copilot you already pay for. No API key. Runs with every tool denied, so it can only read and answer.',
+    command: 'copilot',
+    inputPerMtok: 0,
+    outputPerMtok: 0,
+    local: false,
+    requires: 'copilot on PATH, ~90s per role',
+  },
   {
     id: 'gpt-5-mini',
     provider: 'openai',
@@ -87,8 +100,7 @@ export interface CostEstimate {
   local: boolean;
 }
 
-export function estimateCost(option: Pick<ModelOption, 'inputPerMtok' | 'outputPerMtok' | 'local'>, passes: number): CostEstimate {
-  // A third pass re-reads the assessment rather than the whole posting again.
+export function estimateCost(option: Pick<ModelOption, 'inputPerMtok' | 'outputPerMtok' | 'local'>, passes: number): CostEstimate {  // A third pass re-reads the assessment rather than the whole posting again.
   const factor = passes === 3 ? 1.45 : 1;
   const perPosting =
     ((TOKENS_PER_EVALUATION.input * option.inputPerMtok + TOKENS_PER_EVALUATION.output * option.outputPerMtok) /

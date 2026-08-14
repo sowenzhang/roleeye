@@ -40,8 +40,13 @@ or in a terminal — both write the same files.
 - `roleeye schedule install` — run it daily via Task Scheduler or cron
 - `roleeye backup` — snapshot the authoritative database
 
-Evaluation is optional and off by default. Choosing a local model in the portal
-keeps every posting and your profile on this machine.
+Evaluation is optional and off by default. You can drive it three ways:
+
+| Engine | What it needs | Notes |
+|---|---|---|
+| **Agent CLI** (`copilot`) | an agent you already pay for | No API key. Invoked with every tool denied, so it can only read and answer. ~90s per role. |
+| **Local model** (Ollama) | a pulled model | Nothing leaves this machine. |
+| **API key** (OpenAI-compatible) | `OPENAI_API_KEY` | Fastest, priced per token. |
 
 Not implemented yet: resume tailoring, application tracking, search, and
 analytics. Those commands exit with a usage error naming the phase that will

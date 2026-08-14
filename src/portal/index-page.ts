@@ -387,6 +387,7 @@ function tag(text, kind) {
 
 function costLabel(option) {
   if (option.provider === 'none') return 'no calls';
+  if (option.provider === 'agent-cli') return 'included in your subscription';
   if (option.local) return 'free, runs here';
   return '$' + option.estimate.perHundred.toFixed(2) + ' per 100 roles';
 }
@@ -413,6 +414,7 @@ function renderEngines() {
       top.append(name);
 
       if (option.local && option.provider !== 'none') top.append(tag('stays local', 'good'));
+      else if (option.provider === 'agent-cli') top.append(tag('no API key', 'good'));
       else if (!option.keyPresent) top.append(tag('set ' + option.apiKeyEnv, 'warn'));
 
       const note = document.createElement('p');
@@ -426,6 +428,7 @@ function renderEngines() {
       button.onclick = () => {
         state.reasoning.provider = option.provider;
         state.reasoning.model = option.provider === 'none' ? state.reasoning.model : option.id;
+        if (option.command) state.reasoning.command = option.command;
         if (option.baseUrl) state.reasoning.base_url = option.baseUrl;
         if (option.apiKeyEnv) state.reasoning.api_key_env = option.apiKeyEnv;
         if (option.provider !== 'none') {

@@ -1,6 +1,7 @@
 import { DEFAULT_BASE_URLS, type ReasoningConfig } from '../config/reasoning-schema.js';
 import { ConfigError } from '../util/errors.js';
 import type { Logger } from '../util/logger.js';
+import { createAgentCliProvider } from './agent-cli.js';
 import { OpenAiCompatibleProvider } from './openai-compatible.js';
 import type { ReasoningProvider } from './provider.js';
 
@@ -20,6 +21,7 @@ export interface ProviderFactoryOptions {
 
 export function describeProvider(config: ReasoningConfig): string {
   if (config.provider === 'none') return 'none configured';
+  if (config.provider === 'agent-cli') return `agent CLI · ${config.command} · ${config.model}`;
   const base = config.base_url ?? DEFAULT_BASE_URLS[config.provider] ?? '(no base url)';
   return `${config.provider} · ${config.model} · ${base}`;
 }
@@ -27,6 +29,10 @@ export function describeProvider(config: ReasoningConfig): string {
 /** True when the provider runs on this machine and no data leaves it. */
 export function isLocalProvider(config: ReasoningConfig): boolean {
   if (config.provider === 'ollama') return true;
+
+  // The subprocess is local; the model behind it is not. Claiming otherwise
+  // would be the most misleading thing this file could say.
+  if (config.provider === 'agent-cli') return false;
   if (config.provider !== 'custom') return false;
 
   try {
@@ -42,6 +48,17 @@ export function createProvider(options: ProviderFactoryOptions): ReasoningProvid
   const env = options.env ?? process.env;
 
   if (config.provider === 'none') return undefined;
+
+  if (config.provider === 'agent-cli') {
+    return createAgentCliProvider({
+      command: config.command,
+      model: config.model,
+      // Measured: 98s for one extraction pass against a real posting. An agent
+      // CLI starts a session and carries a large system prompt, so API-shaped
+      // timeouts abort work that would have succeeded.
+      timeoutMs: Math.max(config.timeout_ms, 300_000),
+    });
+  }
 
   const baseUrl = config.base_url ?? DEFAULT_BASE_URLS[config.provider];
   if (!baseUrl) {

@@ -20,8 +20,9 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 6.5 | Review portal: queue, application timeline, analytics | not started |
 | 7 | Career memory / local RAG | speculative |
 | 8 | Learning loop | speculative |
-| 9 | Windows application shell | planned (see `docs/vision.md`) |
-| 10 | Agent mode — delegate to an installed AI agent | gated on the controls in `docs/vision.md` §6.3 |
+| 9 | Desktop application shell (Tauri over the portal, CLI as sidecar) | planned (see `docs/vision.md`) |
+| 10a | Agent CLI as a reasoner (Copilot CLI, all tools denied) | done |
+| 10b | Tool-using agent / application assistant | gated on the controls in `docs/vision.md` §6.3 |
 | — | VPS sync and private job site | deferred, not planned |
 
 ## Decisions log
@@ -66,6 +67,13 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-13 | The evaluation cache key includes provider name and pass count. | A two-pass verdict was being served to a user who had since asked for the adversarial third pass, and one model name means different things on different providers. |
 | 2026-08-13 | Portal routes refuse to merge into a config file that does not load. | The portal shows defaults for an unreadable file; merging one panel's edit into those defaults and saving would silently replace every hand-written setting. A UI warning was not sufficient. |
 | 2026-08-13 | **Corrected**: `docs/vision.md` claimed a posting-to-archetype classifier already exists in `src/portal/presets.ts`. It does not. | `presets.ts` compiles UI selections into scope configuration. The classifier is unbuilt work in Phase 4, and recording it as existing would have hidden real scope. |
+| 2026-08-13 | **Reversed**: agent mode ships now as a reasoner, instead of last. | It was sequenced last because `--yolo` was assumed necessary. It is not: an approval bypass is only needed by an agent that *acts*. Invoked with `--deny-tool=all --disable-builtin-mcps --no-custom-instructions`, the agent has the blast radius of an API call. The dangerous version (tool use, browser automation) stays gated as Phase 10b. |
+| 2026-08-13 | The user brings their own paid coding agent; Copilot CLI is supported first. | Removes the API key, which was the real barrier for anyone who is not already an engineer with a model subscription. Ollama and direct API keys remain supported but are no longer the onboarding story. |
+| 2026-08-13 | `--no-custom-instructions` is part of the hardened flag set, not an optimisation. | An agent otherwise loads instruction files from the working directory and user profile, which would silently join a prompt that also contains an untrusted job posting. |
+| 2026-08-13 | The agent CLI provider reports `requestCount` and leaves `estimatedCostUsd` undefined. | It bills against a subscription quota, not per token. Measured 30.2k input tokens for a 90-character prompt, because the agent carries a large fixed system prompt. Inventing a dollar figure would make spend accounting confidently wrong. |
+| 2026-08-13 | The schema shape is now sent to every provider, not just named. | Found by running the real prompt against the real agent: it returned `company` / `responsibilities` / `required_qualifications` where the schema wanted `primary_mission` / `seniority` / `required_skills`. The OpenAI path had the same gap — `json_object` mode guarantees valid JSON, not correct fields — and 327 passing tests missed it because the scripted provider returns pre-shaped data. |
+| 2026-08-13 | String length limits are included in the schema hint. | The second live run produced correct field names and over-long values. A limit the model is never told about is a limit it cannot respect. |
+| 2026-08-13 | Tauri will load the existing portal over `127.0.0.1` with the CLI as a sidecar. | A conventional Tauri app would add a Rust toolchain and a frontend bundler, breaking the rule that `tsc` is the only build step. Loading a URL keeps one UI implementation and no bundler. |
 
 ## Phase 3b notes
 

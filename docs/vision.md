@@ -22,29 +22,56 @@ constraint gets *more* important as the app gains the ability to act, not less.
 
 ## 2. Who it is for
 
-Phases 0–3b are usable by anyone comfortable with a terminal and an API key.
-That is a small audience. The vision widens it to anyone who can install a
-Windows application, which means the two current prerequisites — a terminal and
-an LLM subscription of their own — both have to become optional.
+Phases 0–3b are usable by anyone comfortable with a terminal. The vision widens
+that to anyone who can install a Windows application.
+
+The onboarding question is now settled: **the user brings an AI agent they
+already pay for.** RoleEye drives that agent's CLI rather than asking for an API
+key, so there is no second subscription and no key to obtain. GitHub Copilot CLI
+is supported first.
+
+A local model (Ollama) remains supported for people who want nothing to leave
+the machine, and a direct API key still works. Neither is the onboarding story.
 
 ## 3. The shape of the product
 
-A Windows desktop application with five jobs:
+Two front ends over one engine, both first-class:
 
-1. **Configure.** Pick companies, roles, locations, pay floor, and rules by
-   clicking, not by editing YAML. (The portal built in Phase 3c is the
-   prototype of this screen and already works this way.)
-2. **Choose an engine.** Select a local model, a hosted model, or an AI agent
-   already installed on the machine. (Section 5.)
-3. **Schedule.** Run on a cadence in the background, using Windows Task
-   Scheduler and native toast notifications.
-4. **Watch.** Show the work as it happens — what was found, what was screened
-   out and by which rule, what was evaluated and what it cost.
-5. **Act.** Open a chosen role, present the tailored resume and the drafted
-   answers, and hand control to the user for the final step.
+- **The CLI**, for people who prefer a terminal and their own scheduler.
+- **A desktop app (Tauri)**, for everyone else.
 
-A local retrieval service (Phase 7) starts with the app and stays running, so
-career history is searchable without a network call.
+Neither is a reimplementation. Anything the app does, the CLI must be able to
+do, because that is what keeps the logic testable.
+
+The app has five jobs:
+
+1. **Configure.** Pick companies, roles, locations, pay floor and rules by
+   clicking. (The Phase 3c portal is the prototype and already works this way.)
+2. **Choose an engine.** Select the agent CLI you already pay for, a local
+   model, or an API key.
+3. **Schedule.** Run on a cadence using Task Scheduler, with native toasts.
+4. **Watch.** Show the work: what was found, what was screened out and by which
+   rule, what was evaluated and what it consumed.
+5. **Act.** Open a chosen role, present the tailored resume and drafted answers,
+   and hand control back for the final step.
+
+### 3.1 Why Tauri, and the constraint it has to respect
+
+`architecture.md` bans bundlers: `tsc` is the only build step. A conventional
+Tauri app would add a Rust toolchain *and* a frontend bundler, which breaks
+that.
+
+The way through is that Tauri can load a URL. The portal is already a plain
+`node:http` server rendering a single page with no build step, so:
+
+- the Tauri window points at `127.0.0.1` and renders the existing portal;
+- the Node CLI runs as a **sidecar** process the app starts and stops;
+- there is exactly one UI implementation, and the browser portal keeps working.
+
+Open question, deliberately not answered yet: whether the sidecar ships a
+bundled Node runtime or requires Node to be installed. That decides the
+installer size and the "non-engineer can install it" claim, and it should be
+decided with numbers rather than taste.
 
 ## 4. Why a desktop app and not a web service
 
@@ -82,22 +109,58 @@ runs a command, and cannot take an action.
 Works with a hosted API or a local Ollama model. This is the default and the
 safe path.
 
-### 5.2 Agent mode (proposed, not built)
+### 5.2 Agent mode (built as a reasoner; tool use still gated)
 
-Many target users already have a coding agent installed and paid for — Copilot
-CLI, Claude Code, and similar. Agent mode reuses it: RoleEye launches that agent
-as a subprocess under the current Windows user, hands it a RoleEye skill
-definition, and lets the agent do the reasoning.
+Many target users already have a coding agent installed and paid for. Agent mode
+reuses it: RoleEye launches that agent as a subprocess under the current Windows
+user and asks it a question.
 
-The appeal is real and worth stating plainly:
+**This is now the primary path, and the API key is no longer required.** GitHub
+Copilot CLI is the first supported agent.
 
-- no second subscription, no API key to obtain
-- the user's existing agent is often a stronger model than they would otherwise
-  configure
-- the agent can do things a bounded model call cannot: open a page, read a form,
-  fill fields, adapt to a site RoleEye has never seen
+The decisive detail is that a reasoner does not need an approval bypass.
+`--yolo` and `--dangerously-skip-permissions` exist so an agent can *act*
+without asking. RoleEye does not want the agent to act; it wants an answer.
+So the agent is invoked with every tool denied:
 
-The cost is equally real, and it is not a detail. See section 6.
+```
+copilot -p <prompt> --deny-tool=all --disable-builtin-mcps
+        --no-custom-instructions --disallow-temp-dir --no-ask-user
+```
+
+`--no-custom-instructions` matters as much as `--deny-tool=all`: an agent
+normally loads instruction files from the working directory and the user
+profile, and those would silently join a prompt that also contains an untrusted
+job posting.
+
+With no tools, no MCP servers, and no instruction files, the agent has the same
+blast radius as an API call: it reads text and returns text. That is why this
+ships now while §6 stays gated — §6 is about agents that *act*.
+
+### 5.3 What it actually costs (measured, not estimated)
+
+Against a real stored posting, using RoleEye's real extraction prompt:
+
+| | Direct API | Copilot CLI |
+| --- | --- | --- |
+| Latency | ~2-5s | **92s per call** |
+| Input tokens | ~3,400 | **~30,000** |
+| Billing | per token, in dollars | subscription quota |
+| Structured output | `json_object` mode | prompt-and-parse |
+
+The agent carries a large fixed system prompt, so a trivial 90-character
+question still cost 30.2k input tokens. Three consequences, all now reflected in
+the design:
+
+1. **Spend accounting cannot be in dollars.** The provider reports
+   `requestCount` and leaves `estimatedCostUsd` undefined rather than inventing
+   a number. Budgets for agent mode must be expressed in calls, not currency.
+2. **Bulk evaluation must be incremental and resumable.** 100 roles × 2 passes ×
+   92s is over five hours. The deterministic funnel that already cuts 1,715
+   postings to ~123 is what makes this viable at all, and it becomes the
+   difference between feasible and not.
+3. **Retries are expensive.** The agent provider makes exactly one repair
+   attempt, and that attempt names the precise schema violations.
 
 ## 6. The security problem in agent mode
 
@@ -343,30 +406,28 @@ The vision does not change what to build next; it changes what to build after.
    tailoring — a change to the existing plan, not an addition. This requires a
    posting-to-archetype classifier that does not exist yet.
 3. Add form answering (§8) to Phase 5, where application records live.
-4. Then the Windows app shell (Phase 9), with model mode only.
-5. Application assistance (§6.3a) and unrestricted agent mode last.
+4. Then the Tauri app shell (Phase 9), pointing at the existing portal with the
+   CLI as a sidecar.
+5. Application assistance and tool-using agent mode last (Phase 10b).
 
-### The onboarding contradiction, stated plainly
+**Done already:** agent-as-reasoner (§5.2) shipped with Phase 3b. It was
+sequenced last while it was assumed to require an approval bypass; once it was
+clear a reasoner needs no tools at all, it became the safest path rather than
+the most dangerous one, and the onboarding contradiction below dissolved.
 
-§2 says both prerequisites — a terminal and an LLM subscription — must become
-optional. Shipping the app with "model mode only" removes the terminal and
-leaves the second one entirely intact: the user still needs an API key or a
-local Ollama install with the hardware and troubleshooting that implies.
+### The onboarding contradiction, resolved
 
-Sequencing agent mode last is right on safety grounds, but it means **agent mode
-cannot be the answer to onboarding**, because it arrives last and it presumes
-the user already owns a paid coding agent — which is not the non-engineer
-audience §2 describes. The mainstream reasoning path has to be decided on its
-own merits before Phase 9 ships. That decision is open.
+§2 previously said both prerequisites — a terminal and an LLM subscription — had
+to become optional. The agent CLI removes the subscription-and-key requirement
+now, and the Tauri shell removes the terminal at Phase 9. What remains is that
+the user must already own a coding agent, which is a narrower claim than "no
+prerequisites" and should be stated honestly in the product's own description.
 
-Two dependency corrections:
+One dependency correction stands:
 
 - Phase 9 must not require Phase 7 (local RAG), which `docs/progress.md` marks
   speculative. A speculative phase cannot be a hard dependency of the adoption
   shell; retrieval is optional at runtime.
-- `architecture.md` §33 orders phases 6, 6.5, 7 and 8 before 9. Either the app
-  shell moves earlier explicitly, or this document's ordering yields to the
-  phase plan. It should be decided rather than left implicit.
 
 ## 11. What this document does not yet cover
 

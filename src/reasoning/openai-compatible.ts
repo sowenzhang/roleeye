@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { redactUrl, type Logger } from '../util/logger.js';
+import { schemaInstruction } from './schema-hint.js';
 import {
   extractJson,
   ProviderError,
@@ -103,7 +104,12 @@ export class OpenAiCompatibleProvider implements ReasoningProvider {
         ...(this.capabilities.structuredOutput ? { response_format: { type: 'json_object' } } : {}),
         messages: [
           { role: 'system', content: request.system },
-          { role: 'user', content: `${request.prompt}${repair}` },
+          {
+            role: 'user',
+            // `json_object` mode guarantees valid JSON, not the right fields.
+            // Without the shape the model invents its own key names.
+            content: `${request.prompt}\n\n${schemaInstruction(request.schemaName, request.schema as z.ZodTypeAny)}${repair}`,
+          },
         ],
       };
 
