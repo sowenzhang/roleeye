@@ -272,6 +272,7 @@ roleeye/
 ├─ config/
 │  ├─ criteria.example.yaml
 │  ├─ sources.example.yaml
+│  ├─ archetypes.example.yaml
 │  └─ sync.example.yaml
 │
 ├─ profile/
@@ -288,12 +289,14 @@ roleeye/
 │  │  ├─ evaluate.ts
 │  │  ├─ recommend.ts
 │  │  ├─ resume.ts
-│  │  ├─ application.ts
-│  │  ├─ ask.ts
+│  │  ├─ digest.ts
+│  │  ├─ schedule.ts
+│  │  ├─ ui.ts
 │  │  ├─ stats.ts
-│  │  ├─ export.ts
-│  │  ├─ sync.ts
-│  │  └─ doctor.ts
+│  │  ├─ doctor.ts
+│  │  ├─ application.ts   (phase 5)
+│  │  ├─ ask.ts           (phase 7)
+│  │  └─ export.ts        (phase 6)
 │  │
 │  ├─ config/
 │  ├─ db/
@@ -310,33 +313,53 @@ roleeye/
 │  │
 │  ├─ normalize/
 │  ├─ evaluate/
-│  │  ├─ advocate.ts
-│  │  ├─ skeptic.ts
-│  │  ├─ judge.ts
+│  │  ├─ evaluator.ts
+│  │  ├─ prompts.ts
+│  │  ├─ schemas.ts
+│  │  ├─ screen.ts
+│  │  ├─ authenticity.ts
+│  │  ├─ criteria.ts
+│  │  ├─ budget.ts
+│  │  ├─ priority.ts
 │  │  ├─ hard-filters.ts
 │  │  └─ scoring.ts
 │  │
 │  ├─ reasoning/
 │  │  ├─ provider.ts
-│  │  └─ copilot-provider.ts
+│  │  ├─ agent-cli.ts
+│  │  ├─ openai-compatible.ts
+│  │  ├─ scripted.ts
+│  │  └─ registry.ts
 │  │
 │  ├─ resume/
-│  │  ├─ fact-store.ts
+│  │  ├─ documents.ts
+│  │  ├─ extract.ts
+│  │  ├─ import.ts
+│  │  ├─ archetypes.ts
+│  │  ├─ assign.ts
 │  │  ├─ matcher.ts
 │  │  ├─ tailor.ts
-│  │  └─ validate-claims.ts
+│  │  ├─ generator.ts
+│  │  ├─ validate.ts
+│  │  ├─ render.ts
+│  │  ├─ diff.ts
+│  │  └─ delta.ts
 │  │
+│  ├─ portal/
 │  ├─ notify/
-│  ├─ applications/
-│  ├─ search/
+│  ├─ schedule/
+│  ├─ core/
+│  ├─ util/
+│  ├─ applications/       (phase 5)
+│  ├─ search/             (phase 6)
 │  │  ├─ structured.ts
 │  │  ├─ fulltext.ts
 │  │  ├─ semantic.ts
 │  │  ├─ planner.ts
 │  │  └─ answer.ts
 │  │
-│  ├─ analytics/
-│  └─ export/
+│  ├─ analytics/          (phase 6)
+│  └─ export/             (phase 6)
 │
 ├─ data/
 │  └─ .gitkeep

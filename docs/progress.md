@@ -95,6 +95,8 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-14 | A delta refuses a stale resume and revalidates every claim before printing it. | It reused the `supported` flag stored at generation time, so a fact retired afterwards still reached the document. A stored verdict is not a current one. |
 | 2026-08-14 | Documents are written before the generation row is committed. | Saving first superseded the previous generation, so a failed write left the database reporting a current resume that did not exist, and the next run saw nothing stale and refused to regenerate. |
 | 2026-08-14 | `approvedSetHash` covers tags and employer, not just statements. | Tags decide which facts an archetype draws on. Re-tagging changed the input set while the resume was still reported current. |
+| 2026-08-14 | Build, typecheck and tests run in CI on Ubuntu and Windows. | The suite is hermetic, so it needs no secrets and calls no model. Its most valuable step is `npm ci`: this lockfile was rewritten to point at the public registry from a machine that cannot reach it, and CI is the only place that can prove the rewrite honest. It did, on the first run. |
+| 2026-08-14 | The shipped `criteria.example.yaml` documents every section the schema accepts, and a test enforces it. | The CLI told users to "set reasoning.provider in config/criteria.yaml" while the example that `init` copies had no reasoning block — nor screening, budget, or notify. It still validated, because all four have defaults, which is exactly why nothing caught it. Found while hand-editing that file during Phase 4 live testing. |
 
 ## Phase 4 notes
 
@@ -464,9 +466,11 @@ Full report: `docs/security-review-phase1.md`. Spend analysis: `docs/spend-analy
 
 ## Open items carried into Phase 2
 
-- The lockfile was normalized textually because this machine cannot reach
+- ~~The lockfile was normalized textually because this machine cannot reach
   `registry.npmjs.org` (TLS interception). Confirm with a clean `npm ci` on a
-  machine or CI runner with public registry access.
+  machine or CI runner with public registry access.~~ **Confirmed 2026-08-14**:
+  the first CI run installed from this lockfile against the public registry on
+  both Ubuntu and Windows. The rewrite is honest and the tarballs exist there.
 - `scripts/measure-corpus.ts` performs live network calls. It is a developer
   tool, never invoked by the product or the test suite.
 

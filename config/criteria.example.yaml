@@ -56,3 +56,67 @@ preferences:
       - large people-management scope
       - pure infrastructure
       - pure platform operations
+
+# ---------------------------------------------------------------------------
+# Everything below is optional: each block has working defaults, and the
+# portal (`roleeye ui`) writes these same keys. They are shown here because
+# the CLI points you at this file when it needs one of them.
+# ---------------------------------------------------------------------------
+
+# Deterministic screening (phase 3a). Runs before any model is called.
+screening:
+  enabled: true
+  # Days a posting must have been watched before longitudinal signals speak.
+  observation_window_days: 21
+  # Continuously open beyond this many days counts as stale.
+  stale_after_days: 60
+  # Reposts inside the window that suggest an evergreen pipeline advert.
+  evergreen_repost_threshold: 3
+  minimum_description_chars: 400
+  duplicate_company_threshold: 3
+  block_on_high_fraud_risk: true
+
+# Hard spending limits. Evaluation stops when one is reached.
+budget:
+  # Evaluating every eligible role is a multi-hour job; a small run that
+  # finishes is worth more than a large one you cancel.
+  max_jobs_per_scan: 5
+  max_cost_per_scan_usd: 1
+  max_cost_per_month_usd: 20
+  on_exhausted: stop
+
+# The model. `provider: none` means nothing is ever sent anywhere.
+#
+#   agent-cli  an agent you already pay for, run with every tool denied
+#   ollama     a local model; nothing leaves this machine
+#   openai / anthropic / custom   an API key read from the environment
+reasoning:
+  provider: none
+  model: gpt-5-mini
+  # For agent-cli: the executable, e.g. `copilot`, `claude`, `gemini`.
+  command: copilot
+  # Read from the environment, never stored in this file.
+  api_key_env: OPENAI_API_KEY
+  # 2 = extract + assess. 3 adds an adversarial pass that argues against fit.
+  passes: 2
+  max_output_tokens: 1600
+  timeout_ms: 120000
+  # Only used by API providers, for cost accounting.
+  pricing:
+    input_per_mtok: 0
+    output_per_mtok: 0
+
+# How you hear about anything. Defaults to APPLY only: a notifier that fires
+# on everything gets muted, and a muted notifier still looks like it works.
+notify:
+  channels:
+    terminal: true
+    desktop: false
+    webhook: false
+  min_decision: APPLY
+  min_score: 0
+  max_items: 5
+  notify_on_empty: false
+  notify_on_error: true
+  webhook:
+    timeout_ms: 10000

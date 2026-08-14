@@ -228,6 +228,10 @@ npm run build     # emit dist/
 
 Provider tests run entirely from committed fixtures in `tests/fixtures/`.
 
+Every push and pull request runs all three on Ubuntu and Windows
+(`.github/workflows/ci.yml`). The suite is hermetic — DNS, the platform, and the
+reasoning provider are injected — so CI needs no secrets and calls no model.
+
 ## Rules that must not be broken
 
 - The local SQLite database is the source of truth; the VPS is a replica.
