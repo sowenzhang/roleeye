@@ -1,0 +1,60 @@
+# Role archetypes: one tailored resume each.
+#
+# An archetype is a kind of role you pursue, not a posting. Each one gets a
+# single carefully reviewed resume, generated from your approved facts and
+# regenerated only when the archetype, the facts, or your profile change.
+#
+# Three to six is the working range. One is a generic resume; twenty is
+# per-posting tailoring wearing a disguise.
+#
+# Seed this file from the role families the portal already knows:
+#   roleeye resume archetypes --seed software,ai,infra
+
+archetypes:
+  - id: ai-platform
+    label: AI platform engineering
+    # Title words that indicate this archetype.
+    titles:
+      - machine learning engineer
+      - ml engineer
+      - ai engineer
+      - applied scientist
+    # Titles that look similar and are a different job.
+    excludes:
+      - sales engineer
+      - research intern
+    # Skills the archetype is built around. Matched against the requirements
+    # already extracted during evaluation, so classification costs nothing.
+    skills:
+      - inference
+      - gpu
+      - pytorch
+      - vector database
+      - model serving
+    # Shown to the model when the resume is generated.
+    focus: Serving models in production, and the platform around them.
+    # Optional: only draw on approved facts carrying these tags.
+    fact_tags: []
+
+  - id: payments
+    label: Payments backend
+    titles:
+      - payments engineer
+      - backend engineer
+    excludes: []
+    skills:
+      - ledger
+      - settlement
+      - pci
+      - double-entry
+    focus: Money movement, correctness, and reconciliation.
+    fact_tags: []
+
+classification:
+  # Below this, a posting is left unassigned rather than forced into the
+  # nearest archetype. An unassigned pile usually means an archetype is missing.
+  min_score: 0.35
+  # How far the winner must beat the runner-up before it counts as a decision.
+  min_margin: 0.1
+  # Ask the model to break ties. Off by default: classification is free.
+  model_tiebreak: false

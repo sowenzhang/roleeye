@@ -42,6 +42,19 @@ function fence(text: string): string {
 }
 
 /**
+ * The same fence, for other pipelines that must quote untrusted text.
+ *
+ * Exported rather than reimplemented: Phase 4 tailors a resume against a
+ * posting's requirements, and a second copy of this logic is a second place for
+ * the marker-neutralising rule to be forgotten.
+ */
+export function fenceUntrusted(text: string): string {
+  return fence(text);
+}
+
+export const UNTRUSTED_SAFETY = SAFETY;
+
+/**
  * Headings that mark the tail of a posting.
  *
  * Matched against the whole block, not a line prefix. A prefix match truncated a

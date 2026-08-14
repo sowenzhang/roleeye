@@ -8,6 +8,7 @@ import { createRepositories, type Repositories } from '../../src/db/repositories
 import { runScan, passesDiscoveryFilters } from '../../src/discovery/scan.js';
 import { getAdapter } from '../../src/discovery/registry.js';
 import { criteriaSchema, sourcesSchema, syncSchema } from '../../src/config/schema.js';
+import { archetypesSchema } from '../../src/config/archetype-schema.js';
 import type { AppConfig } from '../../src/config/load.js';
 import type { HttpClient } from '../../src/discovery/source-adapter.js';
 import { silentLogger } from '../../src/util/logger.js';
@@ -47,6 +48,7 @@ function buildConfig(overrides?: { sources?: unknown }): AppConfig {
     criteria: criteriaSchema.parse({}),
     sources,
     sync: syncSchema.parse({}),
+    archetypes: archetypesSchema.parse({}),
     loadedFiles: [],
     missingFiles: [],
   };

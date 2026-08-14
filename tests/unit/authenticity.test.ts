@@ -29,6 +29,7 @@ function job(over: Partial<JobRecord> = {}): JobRecord {
     salaryPeriod: undefined,
     descriptionText: 'x'.repeat(1200),
     descriptionHash: 'hash',
+    contentKey: undefined,
     hasBody: true,
     fingerprint: 'fp',
     clusterKey: 'ck',

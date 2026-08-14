@@ -4,6 +4,7 @@ import { parse as parseYaml } from 'yaml';
 import type { z } from 'zod';
 import { ConfigError } from '../util/errors.js';
 import { criteriaSchema, sourcesSchema, syncSchema } from './schema.js';
+import { archetypesSchema, type ArchetypesConfig } from './archetype-schema.js';
 import type { CriteriaConfig, SourcesConfig, SyncConfig } from './schema.js';
 import { loadDotEnv, resolveEnvironment, type Environment } from './paths.js';
 
@@ -12,6 +13,7 @@ export interface AppConfig {
   criteria: CriteriaConfig;
   sources: SourcesConfig;
   sync: SyncConfig;
+  archetypes: ArchetypesConfig;
   loadedFiles: string[];
   missingFiles: string[];
 }
@@ -110,7 +112,18 @@ export function loadConfig(options: LoadOptions): AppConfig {
   const sources = loadSection(env.paths.configDir, 'sources.yaml', sourcesSchema, allowDefaults, loadedFiles, missingFiles);
   const sync = loadSection(env.paths.configDir, 'sync.yaml', syncSchema, true, loadedFiles, missingFiles);
 
-  return { env, criteria, sources, sync, loadedFiles, missingFiles };
+  // Always defaulted: an empty archetype list is a valid state, and it is the
+  // state everyone is in before they reach Phase 4.
+  const archetypes = loadSection(
+    env.paths.configDir,
+    'archetypes.yaml',
+    archetypesSchema,
+    true,
+    loadedFiles,
+    missingFiles,
+  );
+
+  return { env, criteria, sources, sync, archetypes, loadedFiles, missingFiles };
 }
 
 export function enabledSources(config: AppConfig): SourcesConfig['sources'] {
@@ -118,4 +131,5 @@ export function enabledSources(config: AppConfig): SourcesConfig['sources'] {
 }
 
 export type { CriteriaConfig, SourcesConfig, SyncConfig };
+export type { ArchetypesConfig, ArchetypeConfig } from './archetype-schema.js';
 export type { SourceConfig } from './schema.js';

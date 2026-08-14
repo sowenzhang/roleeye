@@ -7,6 +7,7 @@ import { Evaluator } from '../../src/evaluate/evaluator.js';
 import { BudgetGuard } from '../../src/evaluate/budget.js';
 import { ScriptedProvider } from '../../src/reasoning/scripted.js';
 import { criteriaSchema, sourcesSchema, syncSchema } from '../../src/config/schema.js';
+import { archetypesSchema } from '../../src/config/archetype-schema.js';
 import type { AppConfig } from '../../src/config/load.js';
 import type { DiscoveredJob } from '../../src/core/types.js';
 import { silentLogger } from '../../src/util/logger.js';
@@ -85,6 +86,7 @@ function appConfig(overrides: Record<string, unknown> = {}): AppConfig {
     }),
     sources: sourcesSchema.parse({}),
     sync: syncSchema.parse({}),
+    archetypes: archetypesSchema.parse({}),
     loadedFiles: [],
     missingFiles: [],
   };
@@ -387,7 +389,7 @@ describe('evaluation pipeline', () => {
     const requests = instance.describeRequest(job);
 
     assert.deepEqual(requests.map((request) => request.stage), ['extract', 'assess']);
-    assert.ok(requests[0]?.estimatedTokens > 0);
+    assert.ok((requests[0]?.estimatedTokens ?? 0) > 0);
     assert.equal(scripted.calls.length, 0, 'a dry run must not call the provider');
   });
 

@@ -17,13 +17,14 @@ the technical design and implementation phases.
 
 ## Status
 
-**Phases 0, 1, 2, 2.5, 3a, 3b, 3c, and 3.5 are implemented.**
+**Phases 0, 1, 2, 2.5, 3a, 3b, 3c, 3.5, and 4 are implemented.**
 
 RoleEye runs a complete deterministic loop with no model and no spend: discover
 roles, keep permanent history, filter them against your rules, screen them for
 scams, and run itself on a schedule. Add a model and it also evaluates fit,
-explains its reasoning, and accounts for every token. Configure it in a browser
-or in a terminal — both write the same files.
+explains its reasoning, tailors one resume per kind of role you pursue, and
+accounts for every token. Configure it in a browser or in a terminal — both
+write the same files.
 
 - `roleeye ui` — local configuration portal on `127.0.0.1`
 - `roleeye init --interactive` — the same setup as a terminal interview
@@ -36,6 +37,8 @@ or in a terminal — both write the same files.
 - `roleeye evaluate` — score fit with a model; `--dry-run` shows cost first
 - `roleeye recommend` — the shortlist, with reasons and concerns
 - `roleeye digest --send` — tell you about it: terminal, Windows toast, or webhook
+- `roleeye resume import <file>` — read your `.docx`/`.pdf` resume into draft facts
+- `roleeye resume generate <archetype>` — one tailored resume per kind of role
 - `roleeye stats --cost` — what has been spent, by model and by day
 - `roleeye list` / `roleeye show` — query the local record
 - `roleeye schedule install` — run it daily via Task Scheduler or cron
@@ -130,6 +133,7 @@ npm run roleeye -- scan --dry-run
 | `roleeye evaluate` | Score fit with a model; `--dry-run` prints the prompts and the cost without sending |
 | `roleeye recommend` | The shortlist with reasons, concerns, and what to verify |
 | `roleeye digest` | Summarise what deserves attention; `--send` delivers it, `--test` proves the channels work |
+| `roleeye resume` | Fact store, role archetypes, and tailored resumes — see below |
 | `roleeye stats` | Counts by source and decision; `--cost` shows spend by model and day |
 | `roleeye list` | Filter stored jobs by company, title, department, source, country, date |
 | `roleeye show` | Show one job with its sources, history, reposts, and snapshots |
@@ -138,6 +142,35 @@ npm run roleeye -- scan --dry-run
 
 Every command supports `--json` for scripting and returns meaningful exit codes:
 `0` ok, `1` error, `2` usage, `3` config, `4` not found, `5` completed with warnings.
+
+## Resumes
+
+Resumes are tailored per **role archetype** — a kind of role you pursue, like
+"AI platform engineering" — not per posting. A hundred discovered roles produce
+a hundred documents nobody reads, at a hundred times the cost.
+
+```bash
+roleeye resume import ~/jane-doe.docx        # -> draft facts, unusable yet
+roleeye resume facts                          # review what it found
+roleeye resume approve --experience acme-corp-staff-software-engineer
+roleeye resume archetypes --seed "software,ai"
+roleeye resume generate ai                    # one call, one reviewed resume
+roleeye resume classify                       # assign stored roles; zero model calls
+roleeye resume delta <job-id>                 # on APPLY only: headline, order, note
+```
+
+The rules this enforces:
+
+| Rule | What it means |
+|---|---|
+| Nothing is used until a human approves it | Import always produces drafts, including your own `accomplishments.yaml` |
+| Approval is bound to the words | Editing an approved statement returns it to draft |
+| Every claim traces to approved facts | A bullet cites fact IDs; `resume-provenance.md` shows them |
+| Nothing is invented | Numbers and named technologies must appear in the cited facts, or the claim is dropped before it reaches a document |
+| Classification is free | Assigning roles to archetypes makes no model calls, and an ambiguous posting is left unassigned rather than guessed |
+
+Reading `.pdf` resumes needs `pdfjs-dist`, an optional 33 MB install
+(`npm install pdfjs-dist`). `.docx` needs nothing extra.
 
 ## Screening
 

@@ -1624,12 +1624,16 @@ Migration 005 adds:
   approved_at, statement hash, and the import it came from
 - `fact_imports` — one row per imported document: path, sha256, format, byte
   size, extractor and version, counts
-- `archetypes` and `archetype_assignments` — assignment carries the score, the
-  method (`deterministic` / `manual` / `model`), and the criteria hash
-- `resume_generations` — archetype, fact ID set hash, profile hash, provider,
-  model, and the resulting artifact
+- `archetype_assignments` — assignment carries the score, the method
+  (`deterministic` / `manual` / `model`), and the archetype hash
+- `resume_generations` and `resume_claims` — archetype, fact set hash, profile
+  hash, provider, model, and every generated sentence with the facts it cites
 - `artifacts` gains `archetype_id`, `snapshot_id`, `content_hash`,
   `generation_id`, and `superseded_at`
+
+Archetypes themselves are **configuration**, not a table: `config/archetypes.yaml`
+with a content-derived hash, exactly as criteria are. They are declarative, the
+user owns them, and the portal edits them. Only the assignment is state.
 
 ### Document import dependencies
 

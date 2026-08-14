@@ -14,7 +14,7 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 3c | Configuration portal (`roleeye ui`) | done |
 | 3b | Requirement extraction, reasoning provider, evaluation, cache, spend accounting, `evaluate` + `recommend` | done |
 | 3.5 | Notifier (terminal, desktop, webhook), daily digest, `digest` | done |
-| 4 | Fact store, `.docx`/`.pdf` import as draft facts, **archetype** resumes, claim validation, resume diff, `.docx` output | in progress |
+| 4 | Fact store, `.docx`/`.pdf` import as draft facts, **archetype** resumes, claim validation, resume diff, `.docx` output | done |
 | 5 | Application tracking, state history, notes, recommendation overrides, application question bank | not started |
 | 6 | SQL search, FTS5, funnel + segment analytics, `stats` | not started |
 | 6.5 | Review portal: queue, application timeline, analytics | not started |
@@ -83,6 +83,85 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-14 | `mammoth` and `docx` are dependencies; `pdfjs-dist` is an optional peer, dynamically imported. | Measured installed size: 2.1 MB, 4.4 MB, and 32.9 MB. The PDF reader is eight times the rest of the feature combined and is needed only if the user's resume is a PDF, which follows the Playwright precedent. `.docx` is the primary path and must not require a second install. All three were tested against real files — a generated `.docx` round-tripped through `mammoth`, and a hand-built PDF read back through `pdfjs-dist` — before being chosen. |
 | 2026-08-14 | Imported resumes are treated as untrusted input under §40. | A resume is a file of unknown provenance: templates are downloaded and PDF is a program format. Size is bounded before parsing, extracted text is capped, the PDF reader runs with `isEvalSupported: false` and no worker or network, and extracted text is fenced when it reaches a prompt. |
 | 2026-08-14 | Removed the empty `src/notifications/` and `src/sync/` placeholders. | `src/notify/` has held the real notifier since Phase 3.5, and VPS sync is recorded as deferred and not planned. Directories reserved for work that will not happen read as unfinished work. |
+| 2026-08-14 | Archetypes are configuration with a content hash, not a database table, reversing what the Phase 4 plan said that morning. | They are declarative, the user owns them, and the portal will edit them — the same shape as `criteria.yaml`, whose content hash already solves staleness. Only the *assignment* of a posting to an archetype is state. |
+| 2026-08-14 | Validation counts the employer, title and dates of a cited fact's own experience as evidence. | The first live generation wrote "Staff software engineer at Acme Corp since 2019" and had it rejected as invention. The store holds that data — it is the section heading of the resume — but no fact statement repeats it, so the summary was unwriteable. Evidence is still per cited fact, so a claim cannot borrow one employer's name while citing another's work. |
+| 2026-08-14 | A resume bullet is the only thing extraction turns into a fact. | Resume prose is summary and self-description. Importing it produces a store full of "Results-driven engineer with a passion for scale" — sentences the user would never put on a tailored resume and now has to reject one at a time. |
+| 2026-08-14 | `npm run typecheck` never checked a single test file. | `tsconfig.tests.json` listed `tests/**/*.ts` in `include`, but inherited `exclude: ["tests"]` from the base config, which wins. Sixteen type errors were sitting in the suite, invisible because `tsx` strips types without checking them. |
+
+## Phase 4 notes
+
+The phase began by settling four things the plan had left wrong or unstated —
+the archetype classifier that did not exist, where facts live, whether the
+`artifacts` table could be reused, and which libraries read a `.docx`. Each is
+in the decisions log above.
+
+### The pipeline
+
+`resume import` → `resume approve` → `resume archetypes` → `resume classify` →
+`resume generate` → `resume delta`. Import and approval are separate commands
+because approval is the point where a human is required, and a step that runs
+automatically is a step nobody performs.
+
+### Classification costs nothing, and says so
+
+Assigning 12 postings to 2 archetypes makes zero model calls: it scores the
+title against the archetype's own terms and the requirements Phase 3b already
+extracted. `AssignmentSummary.modelCalls` is typed as the literal `0`, so a
+regression that quietly adds a call cannot compile.
+
+A weak or tied score leaves the posting unassigned rather than guessing. The
+unassigned pile is the signal that an archetype is missing, and a wrong
+assignment silently sends the wrong resume.
+
+### What live testing changed
+
+The suite passed before any of this was found. All of it came from running the
+thing against a real model and a real document.
+
+- **The summary was unwriteable.** The first live generation produced "Staff
+  software engineer at Acme Corp since 2019…", which validation rejected as an
+  invented number *and* an invented term. Both facts are in the store, in the
+  experience block that prints as the section heading. Validation now counts a
+  cited fact's own employer, title and dates as evidence.
+- **`--seed software,ai` reported "no role families matched"** without saying
+  which ids exist. (The cause was PowerShell splitting the argument, not the
+  parser — but the message was useless either way, and now lists them.)
+- **`resume show` printed raw experience ids** as section labels.
+
+The second live run, through Copilot CLI with `claude-sonnet-4.5`, produced a
+clean resume: three bullets, a summary, every claim traced to an approved fact,
+nothing dropped. It led with the GPU inference bullet for the AI archetype —
+which is the entire point of an archetype — and left out the Globex facts,
+because only the Acme experience block had been approved.
+
+### Validation is the product
+
+`validate.ts` is written adversarially, against the specific ways a model
+embellishes when asked to "tailor": rounding 43% to "nearly half", adding the
+technology the job asked for, promoting a team of three to "a large team". Each
+one is a test. A claim must cite approved facts, its numbers must appear in
+them, and any named technology or acronym must too.
+
+Unsupported claims never reach a document. They are stored with their problems
+and reported, so the user sees what the model tried to say.
+
+### Cost
+
+One archetype resume is about 360 tokens of approved facts and one call.
+Twelve postings across two archetypes cost two generations, not twelve — the
+assertion is in the test suite rather than in a comment.
+
+### Import
+
+`.docx` via `mammoth`, `.pdf` via an optional `pdfjs-dist`, `.md`/`.txt`/`.yaml`
+directly. Only bullets become facts. Employment headings are parsed only when a
+date range makes them unambiguous; where the shape is genuinely ambiguous —
+which half of "Northwind Trading Systems 2019 – 2023" is the employer — nothing
+is guessed and the ambiguity is reported.
+
+Everything imported is a draft. Re-importing the same file reconciles rather
+than duplicating, and editing an approved statement returns it to draft, because
+approval was given to particular words.
 
 ## Phase 3.5 notes
 

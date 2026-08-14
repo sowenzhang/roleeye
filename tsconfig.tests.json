@@ -6,5 +6,7 @@
     "outDir": "dist-tests",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "//": "exclude is redeclared because the base config excludes tests; inheriting it made this script check src twice and the tests never.",
+  "exclude": ["node_modules", "dist", "dist-tests"]
 }

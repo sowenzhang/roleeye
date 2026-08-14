@@ -54,6 +54,7 @@ describe('ingestion pipeline', () => {
 
     const first = second[0];
     assert.ok(first);
+    assert.ok(first.jobId);
     assert.equal(repos.snapshots.countForJob(first.jobId), 1, 'unchanged content stores one snapshot');
   });
 
@@ -64,6 +65,7 @@ describe('ingestion pipeline', () => {
     const created = ingestJob(repos, job, { ...DEFAULTS, seenAt: '2026-08-12T10:00:00.000Z' });
     ingestJob(repos, job, { ...DEFAULTS, seenAt: '2026-08-14T10:00:00.000Z' });
 
+    assert.ok(created.jobId);
     const stored = repos.jobs.findById(created.jobId);
     assert.ok(stored);
     assert.equal(stored.firstSeenAt, '2026-08-12T10:00:00.000Z');
@@ -84,6 +86,7 @@ describe('ingestion pipeline', () => {
 
     assert.equal(changed.jobId, created.jobId);
     assert.equal(changed.outcome, 'changed');
+    assert.ok(created.jobId);
     assert.equal(repos.snapshots.countForJob(created.jobId), 2, 'old posting body is retained');
 
     const events = repos.events.listForJob(created.jobId).map((event) => event.eventType);
@@ -104,6 +107,7 @@ describe('ingestion pipeline', () => {
     assert.equal(later.outcome, 'reposted');
     assert.equal(repos.jobs.count(), 1);
 
+    assert.ok(created.jobId);
     const reposts = repos.events.listRepostsForJob(created.jobId);
     assert.equal(reposts.length, 1);
 
@@ -147,6 +151,7 @@ describe('ingestion pipeline', () => {
     ingestJob(repos, job, { ...DEFAULTS, seenAt: '2026-08-13T10:00:00.000Z' });
     ingestJob(repos, job, { ...DEFAULTS, seenAt: '2026-08-14T10:00:00.000Z' });
 
+    assert.ok(created.jobId);
     assert.equal(repos.events.listForJob(created.jobId).length, 3);
     assert.equal(repos.snapshots.listForJob(created.jobId).length, 1);
   });

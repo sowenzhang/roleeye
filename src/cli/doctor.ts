@@ -55,10 +55,14 @@ export const doctorCommand: Command = {
     for (const file of config.missingFiles) {
       const base = path.basename(file);
       const required = base === 'criteria.yaml' || base === 'sources.yaml';
+      const fix =
+        base === 'archetypes.yaml'
+          ? 'optional until you generate resumes — create it with `roleeye resume archetypes --seed software,ai`'
+          : `copy config/${base.replace('.yaml', '.example.yaml')}`;
       checks.push({
         name: `config ${base}`,
         status: required ? 'fail' : 'warn',
-        detail: `${file} (missing — copy config/${base.replace('.yaml', '.example.yaml')})`,
+        detail: `${file} (missing — ${fix})`,
       });
     }
 

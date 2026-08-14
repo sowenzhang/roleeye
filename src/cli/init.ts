@@ -14,7 +14,7 @@ interface CopyPlan {
   to: string;
 }
 
-const CONFIG_FILES = ['criteria', 'sources', 'sync'] as const;
+const CONFIG_FILES = ['criteria', 'sources', 'sync', 'archetypes'] as const;
 const PROFILE_FILES: ReadonlyArray<readonly [string, string]> = [
   ['career-profile.example.md', 'career-profile.md'],
   ['accomplishments.example.yaml', 'accomplishments.yaml'],
