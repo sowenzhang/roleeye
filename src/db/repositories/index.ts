@@ -9,6 +9,8 @@ import { ScreeningRepository, LlmCallRepository } from './screenings.js';
 import { EvaluationRepository } from './evaluations.js';
 import { FactRepository } from './facts.js';
 import { ArchetypeAssignmentRepository, ArtifactRepository, ResumeRepository } from './resumes.js';
+import { ApplicationRepository, NoteRepository } from './applications.js';
+import { AnswerRepository } from './answers.js';
 
 export interface Repositories {
   companies: CompanyRepository;
@@ -24,6 +26,9 @@ export interface Repositories {
   assignments: ArchetypeAssignmentRepository;
   resumes: ResumeRepository;
   artifacts: ArtifactRepository;
+  applications: ApplicationRepository;
+  notes: NoteRepository;
+  answers: AnswerRepository;
 }
 
 export function createRepositories(db: Database): Repositories {
@@ -41,6 +46,9 @@ export function createRepositories(db: Database): Repositories {
     assignments: new ArchetypeAssignmentRepository(db),
     resumes: new ResumeRepository(db),
     artifacts: new ArtifactRepository(db),
+    applications: new ApplicationRepository(db),
+    notes: new NoteRepository(db),
+    answers: new AnswerRepository(db),
   };
 }
 
@@ -58,6 +66,9 @@ export {
   ArchetypeAssignmentRepository,
   ResumeRepository,
   ArtifactRepository,
+  ApplicationRepository,
+  NoteRepository,
+  AnswerRepository,
 };
 export type { JobRecord, JobListFilters, ScopeState } from './jobs.js';
 export type { SourcePosting } from './source-postings.js';
@@ -66,3 +77,5 @@ export type { Screening, SpendSummary } from './screenings.js';
 export type { EvaluationRecord } from './evaluations.js';
 export type { Fact, FactImport, FactStatus, Experience } from './facts.js';
 export type { ArchetypeAssignment, ResumeGeneration, ResumeClaim, ArtifactRecord } from './resumes.js';
+export type { Application, StatusEvent, RoleFeedback, FeedbackKind } from './applications.js';
+export type { StoredAnswer, AnswerLookup, AnswerProvenance, AnswerScope } from './answers.js';
