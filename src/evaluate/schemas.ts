@@ -27,6 +27,23 @@ const categoryAssessment = z.object({
   evidence: z.string().max(400),
 });
 
+/**
+ * Postings are third-party text. If one contains instructions aimed at an
+ * automated reader, that is reported to the user, never obeyed.
+ *
+ * Every prompt carries the instruction to report injections here, so every
+ * schema must accept the field. When only the extraction schema had it, a model
+ * that correctly detected an injection during assessment had its entire answer
+ * rejected as an unrecognised key — which meant a hostile posting was *more*
+ * likely to fail evaluation than a benign one. Found by a live run.
+ */
+const embeddedInstructions = z
+  .object({
+    found: z.boolean(),
+    quote: z.string().max(300).optional(),
+  })
+  .default({ found: false });
+
 export const requirementsSchema = z
   .object({
     primary_mission: z.string().max(400),
@@ -39,16 +56,7 @@ export const requirementsSchema = z
     preferred_skills: z.array(z.string().max(80)).max(20),
     domain: z.array(z.string().max(60)).max(10),
     risks_to_verify: z.array(z.string().max(200)).max(10),
-    /**
-     * Postings are third-party text. If one contains instructions aimed at an
-     * automated reader, that is reported to the user, never obeyed.
-     */
-    embedded_instructions: z
-      .object({
-        found: z.boolean(),
-        quote: z.string().max(300).optional(),
-      })
-      .default({ found: false }),
+    embedded_instructions: embeddedInstructions,
   })
   .strict();
 
@@ -73,6 +81,7 @@ export const assessmentSchema = z
     best_resume_angles: z.array(z.string().max(200)).max(6),
     career_direction_fit: z.enum(['strong', 'mixed', 'weak']),
     career_direction_reason: z.string().max(400),
+    embedded_instructions: embeddedInstructions,
   })
   .strict();
 
@@ -98,6 +107,7 @@ export const skepticSchema = z
       )
       .max(7),
     additional_questions: z.array(z.string().max(200)).max(6),
+    embedded_instructions: embeddedInstructions,
   })
   .strict();
 

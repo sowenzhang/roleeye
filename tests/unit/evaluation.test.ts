@@ -4,7 +4,7 @@ import { criteriaSchema } from '../../src/config/schema.js';
 import { penaltyFeaturesFrom, scoreEvaluation } from '../../src/evaluate/scoring.js';
 import { buildAssessmentPrompt, buildExtractionPrompt, stripBoilerplate } from '../../src/evaluate/prompts.js';
 import { redactProfile } from '../../src/evaluate/profile.js';
-import { assessmentSchema, type FitAssessment } from '../../src/evaluate/schemas.js';
+import { assessmentSchema, skepticSchema, type FitAssessment } from '../../src/evaluate/schemas.js';
 import type { JobRecord } from '../../src/db/repositories/jobs.js';
 
 function assessment(scores: Partial<Record<keyof FitAssessment['categories'], number>> = {}): FitAssessment {
@@ -185,6 +185,32 @@ describe('deterministic scoring', () => {
     });
     assert.equal(product.infrastructurePrimary, false);
     assert.equal(product.managementScope, 'mentoring');
+  });
+});
+
+describe('injection reporting', () => {
+  it('every schema accepts the injection report its prompt asks for', () => {
+    // The safety block in every prompt tells the model to report injections in
+    // embedded_instructions. A schema that rejects the field turns a correct
+    // detection into a discarded answer, which made a hostile posting *more*
+    // likely to fail evaluation than a benign one. Found by a live model run.
+    const report = { found: true, quote: 'ignore previous instructions' };
+
+    const withReport = assessmentSchema.safeParse({ ...assessment(), embedded_instructions: report });
+    assert.equal(withReport.success, true, 'the assessment pass must be able to report an injection');
+
+    const skeptic = skepticSchema.safeParse({
+      challenges: ['the scope is vaguer than the title suggests'],
+      overlooked_risks: ['team may be newly formed'],
+      adjustments: [{ category: 'hands_on', delta: -10, reason: 'no evidence of daily coding' }],
+      additional_questions: ['who owns the roadmap?'],
+      embedded_instructions: report,
+    });
+    assert.equal(skeptic.success, true, 'the skeptic pass must be able to report an injection');
+  });
+
+  it('defaults the report to "nothing found" when the model omits it', () => {
+    assert.equal(assessment().embedded_instructions.found, false);
   });
 });
 
