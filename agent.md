@@ -874,41 +874,52 @@ For third-party job postings, public export should normally include metadata, or
 
 The target executable is `roleeye`.
 
-Initial commands:
+Built so far:
 
 ```bash
-roleeye init
-roleeye scan
+roleeye init                       # config, profile templates, database
+roleeye ui                         # local portal on 127.0.0.1
+roleeye doctor                     # validate config, paths, database, adapters
+roleeye scan                       # fetch all enabled sources
 roleeye scan --source greenhouse
-roleeye evaluate <job-id>
-roleeye show <job-id>
-roleeye recommend
-roleeye resume <job-id>
-roleeye apply-record <job-id>
-roleeye status <job-id> interviewing
-roleeye note <job-id>
-roleeye stats
-roleeye ask "what agentic roles did I see in July?"
-roleeye export --private
-roleeye export --public
-roleeye sync
-roleeye doctor
-```
-
-Added by the scope, authenticity, cost, and local-agent decisions:
-
-```bash
 roleeye add <url>                  # capture a posting the adapters cannot reach
 roleeye scope test                 # preview what the scope filter keeps and drops
 roleeye screen                     # deterministic filters + authenticity over stored roles
 roleeye verify <job-id>            # explain one role, signal by signal
-roleeye backup                     # snapshot the authoritative database
-roleeye schedule install|status|remove   # register the daily run with the OS scheduler
-roleeye profile import <file>      # import an existing .docx / .pdf resume as draft facts
-roleeye facts approve <id>         # promote draft facts into the approved store
+roleeye evaluate <job-id>          # score fit with the configured model
+roleeye recommend                  # the shortlist, with reasons and concerns
+roleeye digest --send              # terminal, Windows toast, or webhook
+roleeye show <job-id>
+roleeye list
 roleeye stats --cost               # model spend by day, stage, and model
-roleeye budget                     # show and set spend limits
-roleeye ui                         # local portal on 127.0.0.1
+roleeye schedule install|status|remove   # register the daily run with the OS scheduler
+roleeye backup                     # snapshot the authoritative database
+```
+
+Resumes are per **archetype**, not per posting (architecture.md §33 Phase 4).
+There is deliberately no `roleeye resume <job-id>`: one generation per posting
+is the design this project rejected.
+
+```bash
+roleeye resume import <file>       # .docx / .pdf / .md / .yaml -> draft facts
+roleeye resume facts               # review what was found
+roleeye resume approve --experience <slug>   # nothing is usable until this
+roleeye resume archetypes --seed "software,ai"
+roleeye resume classify            # assign stored roles to archetypes; no model calls
+roleeye resume generate <archetype-id>       # one reviewed resume per archetype
+roleeye resume delta <job-id>      # on APPLY only: headline, bullet order, note
+roleeye resume diff <archetype-id>
+roleeye resume export-facts [<file>]
+```
+
+Planned, not yet built:
+
+```bash
+roleeye apply-record <job-id>      # phase 5
+roleeye status <job-id> interviewing   # phase 5
+roleeye note <job-id>              # phase 5
+roleeye ask "what agentic roles did I see in July?"   # phase 7
+roleeye export --private|--public  # phase 6
 ```
 
 Commands should be scriptable and have non-interactive modes.

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, it } from 'node:test';
+import { parse as parseYaml } from 'yaml';
 import { criteriaSchema, sourcesSchema } from '../../src/config/schema.js';
 import { parseDotEnv } from '../../src/config/paths.js';
 import { redactString, redactValue, REDACTED } from '../../src/util/logger.js';
@@ -33,8 +36,42 @@ describe('criteria schema', () => {
   });
 });
 
-describe('sources schema', () => {
-  it('validates per-type required fields', () => {
+/**
+ * The shipped examples are what `roleeye init` copies, so a broken one is a
+ * broken first run for every new user.
+ *
+ * This exists because the examples drifted: the CLI told users to "set
+ * reasoning.provider in config/criteria.yaml" while `criteria.example.yaml`
+ * had no reasoning block at all — nor screening, budget, or notify. The file
+ * still validated, because every one of those sections has a default, which is
+ * exactly why nothing caught it.
+ */
+describe('shipped example configuration', () => {
+  const read = (name: string): unknown =>
+    parseYaml(readFileSync(path.join(process.cwd(), 'config', name), 'utf8'));
+
+  it('validates criteria.example.yaml', () => {
+    const result = criteriaSchema.safeParse(read('criteria.example.yaml'));
+    assert.equal(result.success, true, JSON.stringify(result.error?.issues));
+  });
+
+  it('validates sources.example.yaml', () => {
+    const result = sourcesSchema.safeParse(read('sources.example.yaml'));
+    assert.equal(result.success, true, JSON.stringify(result.error?.issues));
+  });
+
+  it('shows every section the schema accepts', () => {
+    // A section absent from the example is a section the user has to discover
+    // from an error message, which is where this drift started.
+    const example = read('criteria.example.yaml') as Record<string, unknown>;
+    const accepted = Object.keys(criteriaSchema.parse({}));
+
+    const missing = accepted.filter((key) => !(key in example));
+    assert.deepEqual(missing, [], `criteria.example.yaml does not document: ${missing.join(', ')}`);
+  });
+});
+
+describe('sources schema', () => {  it('validates per-type required fields', () => {
     const ok = sourcesSchema.safeParse({
       sources: [{ name: 'acme', type: 'greenhouse', company: 'Acme', board: 'acme' }],
     });

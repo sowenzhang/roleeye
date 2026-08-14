@@ -1,7 +1,9 @@
 # RoleEye — Product Vision
 
-Status: agreed direction, not yet built. Phases 0–3b are implemented; everything
-here describes where those foundations are heading.
+Status: partly built. Phases 0–4 and 10a are implemented, including the
+archetype resumes and the classifier described in §7; the desktop shell (§3.1,
+phase 9), form answering (§8) and tool-using agent mode (§6, phase 10b) are
+still ahead.
 
 This document exists because the target changed shape. Phases 0–3b were built as
 a local CLI that calls a model API. The vision below keeps that engine and wraps
@@ -310,10 +312,14 @@ The design:
   platform engineering", "payments backend", "engineering management".
 - Each archetype gets **one carefully tailored resume**, generated once and
   reviewed properly, drawn from approved facts.
-- A posting is matched to an archetype by a classifier that **does not exist
-  yet** and must be built. (`src/portal/presets.ts` compiles UI selections into
-  scope configuration; it does not classify postings. An earlier draft of this
-  document claimed otherwise and was wrong.)
+- A posting is matched to an archetype by a classifier. It did not exist when
+  this was written and was built in Phase 4 (`src/resume/archetypes.ts`): it
+  scores the posting title against each archetype's terms and the requirements
+  already extracted during evaluation, so classification makes no model calls,
+  and an ambiguous posting is left unassigned rather than guessed.
+  (`src/portal/presets.ts` compiles UI selections into scope configuration; it
+  does not classify postings. An earlier draft of this document claimed
+  otherwise and was wrong.)
 - On `APPLY`, and only then, RoleEye produces a per-application delta: approved
   fact selection, requirement-specific keyword coverage, summary and skills
   adjustment, bullet selection and ordering — presented as a **diff** to review,
@@ -401,10 +407,11 @@ and keeps engineers as first-class users.
 
 The vision does not change what to build next; it changes what to build after.
 
-1. Finish the engine: notifications (3.5), resume and facts (4), tracking (5).
-2. Build archetype resumes (§7) as part of Phase 4 rather than per-posting
-   tailoring — a change to the existing plan, not an addition. This requires a
-   posting-to-archetype classifier that does not exist yet.
+1. ~~Finish the engine: notifications (3.5), resume and facts (4)~~ — both
+   shipped. Application tracking (5) is next.
+2. ~~Build archetype resumes (§7) as part of Phase 4 rather than per-posting
+   tailoring~~ — shipped, including the posting-to-archetype classifier, which
+   is deterministic and makes no model calls.
 3. Add form answering (§8) to Phase 5, where application records live.
 4. Then the Tauri app shell (Phase 9), pointing at the existing portal with the
    CLI as a sidecar.
