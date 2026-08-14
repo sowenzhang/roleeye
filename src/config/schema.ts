@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { budgetSchema, screeningSchema, unknownHandlingSchema } from './screening-schema.js';
 import { reasoningSchema } from './reasoning-schema.js';
+import { notifySchema } from './notify-schema.js';
 
 const weightSchema = z.number().int().min(0).max(100);
 
@@ -64,6 +65,7 @@ export const criteriaSchema = z
     screening: screeningSchema,
     budget: budgetSchema,
     reasoning: reasoningSchema,
+    notify: notifySchema,
     penalties: z.record(z.union([z.number(), z.record(z.number())])).default({}),
     preferences: z
       .object({

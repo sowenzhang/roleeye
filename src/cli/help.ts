@@ -6,6 +6,7 @@ import { evaluateCommand } from './evaluate.js';
 import { initCommand } from './init.js';
 import { listCommand } from './list.js';
 import { recommendCommand, statsCommand } from './recommend.js';
+import { digestCommand } from './digest.js';
 import { scanCommand } from './scan.js';
 import { scheduleCommand } from './schedule.js';
 import { scopeCommand } from './scope.js';
@@ -25,6 +26,7 @@ export const commands: readonly Command[] = [
   screenCommand,
   evaluateCommand,
   recommendCommand,
+  digestCommand,
   verifyCommand,
   listCommand,
   showCommand,

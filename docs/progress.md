@@ -13,7 +13,7 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 3a | Criteria engine, hard filters, authenticity screening, backup, scheduling, interactive init | done |
 | 3c | Configuration portal (`roleeye ui`) | done |
 | 3b | Requirement extraction, reasoning provider, evaluation, cache, spend accounting, `evaluate` + `recommend` | done |
-| 3.5 | Notifier, daily digest | not started |
+| 3.5 | Notifier (terminal, desktop, webhook), daily digest, `digest` | done |
 | 4 | Fact store, `.docx`/`.pdf` import as draft facts, **archetype** resumes, claim validation, resume diff, `.docx` output | not started |
 | 5 | Application tracking, state history, notes, recommendation overrides, application question bank | not started |
 | 6 | SQL search, FTS5, funnel + segment analytics, `stats` | not started |
@@ -76,6 +76,40 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-13 | Tauri will load the existing portal over `127.0.0.1` with the CLI as a sidecar. | A conventional Tauri app would add a Rust toolchain and a frontend bundler, breaking the rule that `tsc` is the only build step. Loading a URL keeps one UI implementation and no bundler. |
 | 2026-08-13 | Evaluation is capped at 5 roles per run by default, with no maximum and a warning past 20. | Measured 7 minutes per role through an agent CLI, so an uncapped pass over the eligible set is a multi-hour job. A small run that finishes is worth more than a large one the user cancels. The warning states the estimated hours rather than refusing. |
 | 2026-08-13 | The cap keeps the highest-priority roles, ranked deterministically. | A cap that keeps whatever the database returned first is a cap that throws away the best role. Priority reuses the screening verdict already computed — freshness, hiring intent, fraud risk, provenance, stated pay, body length, age — so it is free and cannot be swayed by a posting's persuasive writing. It ranks likelihood of repaying a call, never fit. |
+
+## Phase 3.5 notes
+
+Windows toasts need no native dependency, but they do need three things that
+were only discoverable by trying them:
+
+1. **Windows PowerShell 5.1, not PowerShell 7.** WinRT types cannot be loaded in
+   pwsh, so the script runs under `System32\WindowsPowerShell\v1.0`.
+2. **Both WinRT types loaded explicitly** — the notification manager *and*
+   `Windows.Data.Xml.Dom.XmlDocument`. Loading only the first fails at the point
+   the document is constructed.
+3. **A registered AppUserModelID.** PowerShell's own is used, because a toast
+   from an unregistered app id is silently dropped.
+
+### Toast content travels in an environment variable
+
+Company names and job titles are chosen by whoever posted the job. Embedding
+them in the PowerShell script text means a title containing a quote can end a
+string literal. The XML is passed in `ROLEEYE_TOAST_XML` instead, which
+PowerShell treats as data, and the text is XML-escaped with control characters
+stripped so the document still loads.
+
+### The acceptance criterion was tested literally
+
+"A scheduled scan can notify without a terminal attached" was verified by
+registering a real scheduled task, triggering it, and confirming `Last Result: 0`
+with the toast delivered — not by reasoning that it should work.
+
+### Thresholds default to APPLY only
+
+A notifier that fires on everything gets muted, and a muted notifier is worse
+than none because it still looks like it is working. `notify.min_decision`
+defaults to `APPLY`; the digest command says which setting to lower when it
+finds nothing.
 
 ## Phase 3b notes
 

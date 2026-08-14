@@ -17,7 +17,7 @@ the technical design and implementation phases.
 
 ## Status
 
-**Phases 0, 1, 2, 2.5, 3a, 3b, and 3c are implemented.**
+**Phases 0, 1, 2, 2.5, 3a, 3b, 3c, and 3.5 are implemented.**
 
 RoleEye runs a complete deterministic loop with no model and no spend: discover
 roles, keep permanent history, filter them against your rules, screen them for
@@ -35,6 +35,7 @@ or in a terminal — both write the same files.
 - `roleeye verify <job-id>` — explain one role, signal by signal
 - `roleeye evaluate` — score fit with a model; `--dry-run` shows cost first
 - `roleeye recommend` — the shortlist, with reasons and concerns
+- `roleeye digest --send` — tell you about it: terminal, Windows toast, or webhook
 - `roleeye stats --cost` — what has been spent, by model and by day
 - `roleeye list` / `roleeye show` — query the local record
 - `roleeye schedule install` — run it daily via Task Scheduler or cron
@@ -129,6 +130,7 @@ npm run roleeye -- scan --dry-run
 | `roleeye verify <job-id>` | Explain one role's screening decision, signal by signal |
 | `roleeye evaluate` | Score fit with a model; `--dry-run` prints the prompts and the cost without sending |
 | `roleeye recommend` | The shortlist with reasons, concerns, and what to verify |
+| `roleeye digest` | Summarise what deserves attention; `--send` delivers it, `--test` proves the channels work |
 | `roleeye stats` | Counts by source and decision; `--cost` shows spend by model and day |
 | `roleeye list` | Filter stored jobs by company, title, department, source, country, date |
 | `roleeye show` | Show one job with its sources, history, reposts, and snapshots |
