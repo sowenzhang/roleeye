@@ -17,14 +17,15 @@ the technical design and implementation phases.
 
 ## Status
 
-**Phases 0 through 5 are implemented.**
+**Phases 0 through 6 are implemented.**
 
 RoleEye runs a complete deterministic loop with no model and no spend: discover
 roles, keep permanent history, filter them against your rules, screen them for
 scams, and run itself on a schedule. Add a model and it also evaluates fit,
 explains its reasoning, tailors one resume per kind of role you pursue, and
-accounts for every token. It then tracks what you actually did about it.
-Configure it in a browser or in a terminal — both write the same files.
+accounts for every token. It then tracks what you actually did about it, and
+answers questions about the record it kept. Configure it in a browser or in a
+terminal — both write the same files.
 
 - `roleeye ui` — local configuration portal on `127.0.0.1`
 - `roleeye init --interactive` — the same setup as a terminal interview
@@ -41,7 +42,9 @@ Configure it in a browser or in a terminal — both write the same files.
 - `roleeye resume generate <archetype>` — one tailored resume per kind of role
 - `roleeye apply record <job-id>` — track what you applied to, and what came of it
 - `roleeye apply questions <job-id>` — what the form asks beyond your resume
-- `roleeye stats --cost` — what has been spent, by model and by day
+- `roleeye search "<words>"` — everything recorded: postings, verdicts, notes, answers
+- `roleeye ask "<question>"` — answered from records, with the command that proves it
+- `roleeye stats` — the funnel, segments, and `--cost` for spend by model and day
 - `roleeye list` / `roleeye show` — query the local record
 - `roleeye schedule install` — run it daily via Task Scheduler or cron
 - `roleeye backup` — snapshot the authoritative database
@@ -54,9 +57,8 @@ Evaluation is optional and off by default. You can drive it three ways:
 | **Local model** (Ollama) | a pulled model | Nothing leaves this machine. |
 | **API key** (OpenAI-compatible) | `OPENAI_API_KEY` | Fastest, priced per token. |
 
-Not implemented yet: search, analytics, and the review portal. Those commands
-exit with a usage error naming the phase that will deliver them. See
-[`docs/progress.md`](./docs/progress.md) for status and
+Not implemented yet: the review portal, and career memory. Those are Phase 6.5
+and Phase 7. See [`docs/progress.md`](./docs/progress.md) for status and
 [`docs/vision.md`](./docs/vision.md) for where this is going.
 
 ## Layout
@@ -141,7 +143,9 @@ built CLI or to `tsx` directly (`npx tsx src/index.ts apply questions <id>
 | `roleeye digest` | Summarise what deserves attention; `--send` delivers it, `--test` proves the channels work |
 | `roleeye resume` | Fact store, role archetypes, and tailored resumes — see below |
 | `roleeye apply` | Track applications, their history, and reusable answers — see below |
-| `roleeye stats` | Counts by source and decision; `--cost` shows spend by model and day |
+| `roleeye search` | Search postings, evaluations, notes, answers and outcomes; `--reindex` rebuilds |
+| `roleeye ask` | Answer a question from your records, and name the command that reproduces it |
+| `roleeye stats` | The funnel and its segments; `--cost` shows spend by model and day |
 | `roleeye list` | Filter stored jobs by company, title, department, source, country, date |
 | `roleeye show` | Show one job with its sources, history, reposts, and snapshots |
 | `roleeye schedule` | `install`, `status`, or `remove` the daily run; `--print` shows the command |
@@ -205,6 +209,44 @@ Two rules the bank does not bend:
 |---|---|
 | A protected question is reported, never inferred | Work authorisation, compensation, criminal history: with no stored answer it is flagged unanswered, never filled from a similar-looking previous one |
 | Self-identification is yours alone | EEO/demographic questions are shown so you know they are there, and are never stored or reused |
+
+## Search and analytics
+
+```bash
+roleeye search "kubernetes operators" --decision APPLY --not-applied
+roleeye search --type job-evaluation --company Ramp --since 2026-07-01
+roleeye ask "What AI roles did I see in July but skip?"
+roleeye stats --funnel --segment level
+```
+
+The index is **derived**. Every document is built from a record and carries the
+hash it came from, so `--reindex` is always safe and an unchanged corpus costs
+no writes. Five kinds of document are indexed: `job-description`,
+`job-evaluation`, `application-answer`, `interview-note` and `outcome-summary` —
+the reasoning is searchable, not only the verdict.
+
+Your words are words. FTS5's query language is unreachable from input, so
+`senior "staff" engineer (remote)` searches for those words instead of raising a
+syntax error.
+
+`stats` computes the funnel from records every time and stores no metric:
+
+```text
+discovered → in scope → screened → eligible → evaluated → recommended
+          → applied → recruiter screen → interviewing → final → offer
+```
+
+Stages past *applied* are read from the status history, so an application that
+reached a final round and was then rejected still counts as having had one. A
+rate with no denominator is reported as unknown rather than as 0%. Segment it by
+`company`, `source`, `country`, `level`, `department`, `arrangement`,
+`archetype`, `decision`, `salary_band` or `month`.
+
+`ask` is deterministic and calls no model. It classifies the question
+(`STRUCTURED`, `KEYWORD`, `ANALYTICS`, `HYBRID`, `SEMANTIC`), answers from
+records, and prints the command that reproduces the answer. Questions about
+resemblance are refused rather than guessed at from keyword overlap — that needs
+embeddings, which are Phase 7.
 
 Reading `.pdf` resumes needs `pdfjs-dist`, an optional 33 MB install
 (`npm install pdfjs-dist`). `.docx` needs nothing extra.

@@ -16,7 +16,7 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 3.5 | Notifier (terminal, desktop, webhook), daily digest, `digest` | done |
 | 4 | Fact store, `.docx`/`.pdf` import as draft facts, **archetype** resumes, claim validation, resume diff, `.docx` output | done |
 | 5 | Application tracking, state history, notes, recommendation overrides, application question bank, form inspection | done |
-| 6 | SQL search, FTS5, funnel + segment analytics, `stats` | not started |
+| 6 | SQL search, FTS5, funnel + segment analytics, `stats`, `search`, `ask` | done |
 | 6.5 | Review portal: queue, application timeline, analytics | not started |
 | 7 | Career memory / local RAG | speculative |
 | 8 | Learning loop | speculative |
@@ -109,6 +109,102 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-14 | `isSensitiveQuestion` now matches "authorized to work" and "eligible to work", not only "work authorization". | The commonest US phrasing reverses the word order, so "Are you legally authorized to work in the United States?" was reported as an ordinary question on a real Discord form and would have been answerable from the bank. Found by running the new command against a live posting, not by reading the regex. |
 | 2026-08-14 | Sensitivity patterns are anchored on word boundaries, and identity for a protected question is its whole text. | A cross-model review ran the substring patterns: `age` matched "manage", `race` matched "embrace", `disab` matched "disable". It then showed that the lossy answer key could be collided deliberately, so an employer's ordinary question could be shown the user's answer to a protected one. The key still unifies phrasings; it is no longer trusted alone. |
 | 2026-08-14 | A Greenhouse board and job id must come from the same URL. | Deriving them separately let a configured board be paired with a number taken from an attacker-influenced posting URL, returning another role's questions under this role's name. A configured board that disagrees with the URL is now reported, not reconciled. |
+| 2026-08-14 | The search index is derived from the records, with a hash per document, and is never written to directly (migration 008). | An index that is also a place things are stored eventually disagrees with the database. Because it is derived, `--reindex` is always safe and an incremental sync costs six set-based statements regardless of corpus size. |
+| 2026-08-14 | FTS5 is external-content, and every user term is quoted as a literal phrase. | External content avoids a second copy of every description. Literal quoting is what stops `senior "staff" engineer (remote)` from being read as query syntax: a search box that can raise a syntax error is one people stop using. |
+| 2026-08-14 | Funnel stages past `applied` are read from the status events, not from the current status. | An application that reached a final round and was then rejected still had a final round. Reading the cached status would report a pipeline in which nobody was ever interviewed. |
+| 2026-08-14 | A rate with no denominator is reported as unknown, not as zero. | "0% of applications got a screen" is a claim about a job search. "No applications yet" is a fact about a database. |
+| 2026-08-14 | `ask` is deterministic, refuses semantic questions, and prints the command that reproduces every answer. | A question with an exact answer in a table should not be paraphrased by a model that may get the date wrong (§21). Resemblance questions need embeddings; answering them from keyword overlap would be confident and wrong. |
+| 2026-08-14 | The planner matches companies against the companies that exist, and a constraint consumes its own words. | Guessing an employer from capitalisation reads "Staff Engineer" as one. And "When did I apply to Ramp?" filtered on the company *and* demanded the word appear in the body — FTS requires every term — so a question with a good structured answer returned nothing. Both found by running it. |
+| 2026-08-14 | Every derived document detects change by content, not by identity. | A cross-model review pointed out that evaluations and notes were keyed on their id alone. Nothing edits them today, so nothing was stale — but an index whose correctness rests on nobody adding an edit path later is one that goes stale quietly. Jobs still compare their stored `description_hash`, because re-hashing 100 KB bodies to ask "did anything change?" makes the cheap question expensive. |
+| 2026-08-14 | The funnel window is applied *inside* the latest-verdict subquery. | Taking the latest verdict overall and then filtering by date meant a role recommended in July and re-evaluated in September reported July as recommending nothing. A later opinion must not rewrite an earlier month. |
+| 2026-08-14 | The correlated "latest verdict per role" join stays, because it was measured. | The review predicted it would degrade badly. `scripts/measure-search.ts` at 10,000 jobs: index build 512 ms, incremental sync 82 ms, keyword search 15 ms, that join 4 ms, funnel 3 ms. It is an index seek per row, not a scan. |
+
+## Phase 6 notes
+
+Search, analytics, and `ask` — three commands over data that already existed.
+
+### The index is derived, and that is the design
+
+`search_documents` holds logical documents (§19): a posting, a verdict, a note,
+an answer, an outcome. Every one is built from a record and carries the hash of
+what it was built from, so a rebuild is incremental and dropping the whole index
+is always safe. An index that is *also* a place things are stored eventually
+disagrees with the database, and the database is the source of truth.
+
+FTS5 is external-content, so descriptions are stored once rather than twice — a
+few thousand postings at up to 100 KB each is not something to keep two copies
+of for the sake of a simpler trigger.
+
+Sync is set-based SQL: five `INSERT … SELECT … WHERE NOT EXISTS` statements and
+one delete. A hundred postings and ten thousand cost the same six statements.
+The alternative — read everything, hash it in TypeScript, write it back — is how
+a two-second command becomes a two-minute one exactly when the corpus gets big
+enough to be worth searching.
+
+### User words are words, not query syntax
+
+FTS5's `MATCH` is a language: `AND`, `NEAR`, `*`, `"`, `:` and `^` all mean
+something, and a stray quote is a syntax error. Someone typing
+`senior "staff" engineer (remote)` means those words. Every term is quoted as a
+literal and the operators are unreachable from input, because a search box that
+can raise a syntax error is a search box people stop using.
+
+### The funnel is computed, never remembered
+
+Nothing in migration 008 stores a metric. The funnel is a query over `jobs`,
+`job_screenings`, `evaluations`, `applications` and `application_status_events`,
+which is why those tables record history rather than a current state.
+
+The stages past `applied` read the *events*, not the current status: an
+application that reached a final round and was then rejected had a final round.
+Counting where things ended up would report a pipeline in which nobody was ever
+interviewed.
+
+A rate with no denominator is `undefined`, not `0%`. "0% of applications got a
+screen" is a claim about a job search; "no applications yet" is a fact about a
+database.
+
+### `ask` shows its work, and refuses what it cannot do
+
+The planner is deterministic and makes no model call. That is not a limitation
+of the phase: "When did I apply to Zeta?" has one right answer sitting in a
+table, and sending it to a model adds latency, cost and the possibility of a
+wrong date. §21 says it directly — never produce an exact date or status from
+memory when a record exists.
+
+Every answer names the plan, why it was chosen, and the `roleeye search` or
+`roleeye stats` command that reproduces it. An answering interface that cannot
+be checked is one you have to trust.
+
+SEMANTIC questions — "which roles felt similar to that one?" — are recognised
+and refused, naming embeddings and Phase 7. Answering them from keyword overlap
+would produce a confident, plausible, wrong list.
+
+Two things live testing changed. A company is matched only against companies
+that exist in the database, because guessing from capitalisation reads "Staff
+Engineer" as an employer. And a constraint consumes its own words: "When did I
+apply to Ramp?" filters on the company, and leaving `ramp` in the text query
+also demanded the word appear in the body — FTS requires every term, so the
+question that had a perfectly good structured answer returned nothing.
+
+### What a cross-model review found
+
+| Finding | What it allowed |
+|---|---|
+| `group_concat` over no rows returns NULL, and `body` is `NOT NULL` | An application with no status events would have aborted the *entire* sync, not just its own document. |
+| The funnel took the latest verdict and *then* applied the window | A role recommended in July and re-evaluated in September reported July as having recommended nothing. A later opinion was rewriting an earlier month. |
+| Evaluations and notes were keyed on their id alone | They are append-only today, so nothing was stale. But an index whose correctness rests on nobody adding an edit path later is one that expires quietly. Both now hash the content they were built from and update when it changes. |
+| `\s` does not match ESC | Excerpts collapse whitespace before printing, which does nothing to `\x1b[1A`. A posting could move the cursor up and overwrite the result printed above its own. |
+| The company match was a substring test | "How many roles skip the ramp-up period?" silently restricted the whole question to Ramp. It matches on word boundaries now. |
+| `skip` meant the user skipped | "Which roles skip the technical screen?" was read as `applied: false` and returned nothing, explaining nothing. |
+
+The seventh finding — that the correlated "latest verdict per role" subquery
+would degrade badly — was measured rather than argued about
+(`scripts/measure-search.ts`). At 10,000 jobs and 13,000 documents: a full index
+build 512 ms, an incremental sync over an unchanged corpus 82 ms, a keyword
+search 15 ms, the structured search carrying that join **4 ms**, and the funnel
+3 ms. It is an index seek per row against `idx_evaluations_job`, not a scan, so
+it stays.
 
 ## Phase 5 notes
 
