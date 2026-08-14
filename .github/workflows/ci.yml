@@ -1,0 +1,65 @@
+name: CI
+
+# The suite is hermetic: DNS resolution, the platform, and the reasoning
+# provider are all injected, so nothing here reaches the network or calls a
+# model. No secrets are needed, and none should be added — a job that can spend
+# money is a job a pull request can spend money with.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows because that is where the desktop notifier and the scheduler
+        # actually run; Linux because that is where a scheduled scan is most
+        # likely to be hosted. The tests inject the platform, so a difference
+        # between these two is a real portability bug rather than noise.
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` installs strictly from the lockfile against the public
+      # registry. That is worth more here than anywhere else: this lockfile was
+      # generated behind a corporate mirror and rewritten to point at
+      # registry.npmjs.org, so this job is the only place that proves the
+      # rewrite is honest and the tarballs really exist there.
+      - run: npm ci
+
+      # better-sqlite3 is native. A clean machine is the only place that shows
+      # whether a prebuilt binary is available, or whether contributors will be
+      # made to compile one.
+      - run: npm run build
+
+      # This checks the tests as well as the sources. It did not until
+      # 2026-08-14: tsconfig.tests.json inherited `exclude: ["tests"]` from the
+      # base config, and sixteen type errors sat in the suite unseen.
+      - run: npm run typecheck
+
+      - run: npm test
+
+# Deliberately not run here:
+#
+# - `npm run catalog:check` verifies 51 company boards against live Greenhouse,
+#   Lever and Ashby endpoints. On every push that is someone else's rate limit,
+#   and a red build caused by a company renaming its board is not a defect in
+#   this repository. Run it by hand before a release.
+# - Anything needing `pdfjs-dist`. It is an optional 33 MB peer, and the PDF
+#   tests use an injected reader precisely so CI does not have to install it.
