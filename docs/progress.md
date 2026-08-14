@@ -15,7 +15,7 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 3b | Requirement extraction, reasoning provider, evaluation, cache, spend accounting, `evaluate` + `recommend` | done |
 | 3.5 | Notifier (terminal, desktop, webhook), daily digest, `digest` | done |
 | 4 | Fact store, `.docx`/`.pdf` import as draft facts, **archetype** resumes, claim validation, resume diff, `.docx` output | done |
-| 5 | Application tracking, state history, notes, recommendation overrides, application question bank | not started |
+| 5 | Application tracking, state history, notes, recommendation overrides, application question bank | in progress |
 | 6 | SQL search, FTS5, funnel + segment analytics, `stats` | not started |
 | 6.5 | Review portal: queue, application timeline, analytics | not started |
 | 7 | Career memory / local RAG | speculative |
@@ -100,6 +100,10 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-14 | Fact identity is the statement *and* the employer (migration 006). | The same true sentence under two jobs — "Led a cross-functional platform migration." repeats for a reason — collapsed into one row, and the second job lost its provenance, so a resume cited one employer for work done at both. Adoption still reconciles an unattached fact with the employer a document later supplies, and refuses to guess when the words already sit under two. |
 | 2026-08-14 | A forced reclassification supersedes the manual corrections it overrides, and any fresh write clears that flag. | The manual lookup searched every archetype version, so a correction outranked a deliberate `--force` and the next ordinary run put it back. Fixing that introduced a second bug in the same hour: the superseded flag outlived the row and silently swallowed the *next* correction. Caught by writing the test for the fix rather than by reasoning about it. |
 | 2026-08-14 | Classification batches its reads and writes with one prepared statement. | 601 statements for 100 roles became 4; 1,000 roles now cost 8 statements and 42 ms. The work is a loop over data already held, and it should not cost a multiple of the corpus. |
+| 2026-08-14 | Application tracking ships as `roleeye apply <record\|status\|note\|skip\|list\|show\|answers\|answer>` rather than the planned `apply-record`, `status` and `note`. | Seventeen top-level commands is already more than anyone reads — the user said so — and a bare `status` would have collided with `roleeye resume status` in everybody's memory. |
+| 2026-08-14 | `applications` is rebuilt in migration 007, the third table created before its phase was designed. | It carried a free-text `notes` column duplicating the `notes` table and no way to record which resume was actually sent. A reply six weeks later is only informative if the document that earned it can still be named. |
+| 2026-08-14 | Passing on a recommended role is recorded as deliberately as applying to one. | Both directions are feedback, and the half that gets discarded everywhere else — "it recommended this and I ignored it" — is the half that says the scoring is wrong. Phase 8 can only learn from what phase 5 collects. |
+| 2026-08-14 | Status history orders by insertion within the same instant. | Recording an application and correcting its status in the same millisecond is ordinary, and the tie-break was a random id, so the history displayed in random order. Found by a test that ran the transitions faster than the clock ticks. |
 
 ## Phase 4 notes
 
