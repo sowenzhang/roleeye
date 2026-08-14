@@ -15,7 +15,7 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 3b | Requirement extraction, reasoning provider, evaluation, cache, spend accounting, `evaluate` + `recommend` | done |
 | 3.5 | Notifier (terminal, desktop, webhook), daily digest, `digest` | done |
 | 4 | Fact store, `.docx`/`.pdf` import as draft facts, **archetype** resumes, claim validation, resume diff, `.docx` output | done |
-| 5 | Application tracking, state history, notes, recommendation overrides, application question bank | in progress |
+| 5 | Application tracking, state history, notes, recommendation overrides, application question bank, form inspection | done |
 | 6 | SQL search, FTS5, funnel + segment analytics, `stats` | not started |
 | 6.5 | Review portal: queue, application timeline, analytics | not started |
 | 7 | Career memory / local RAG | speculative |
@@ -104,6 +104,77 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-14 | `applications` is rebuilt in migration 007, the third table created before its phase was designed. | It carried a free-text `notes` column duplicating the `notes` table and no way to record which resume was actually sent. A reply six weeks later is only informative if the document that earned it can still be named. |
 | 2026-08-14 | Passing on a recommended role is recorded as deliberately as applying to one. | Both directions are feedback, and the half that gets discarded everywhere else — "it recommended this and I ignored it" — is the half that says the scoring is wrong. Phase 8 can only learn from what phase 5 collects. |
 | 2026-08-14 | Status history orders by insertion within the same instant. | Recording an application and correcting its status in the same millisecond is ordinary, and the tie-break was a random id, so the history displayed in random order. Found by a test that ran the transitions faster than the clock ticks. |
+| 2026-08-14 | Form inspection reads Greenhouse and reports that it cannot read Lever or Ashby, rather than rendering their apply pages to guess. | Verified against all three live APIs: Greenhouse publishes the question set (`?questions=true`), the other two publish the posting and not the form. Guessing an employer's questions from rendered markup produces a confident wrong record, which the career-page adapter already refuses to do for postings. |
+| 2026-08-14 | Voluntary self-identification questions are reported, never matched against the bank and never stored. | EEO questionnaires are asked per application by design — Instacart's own form says so — and they are the exact categories the product promises never to infer. Two live payload shapes carry them: `compliance[].questions` with `fields`, and `demographic_questions` with `answer_options`. |
+| 2026-08-14 | `isSensitiveQuestion` now matches "authorized to work" and "eligible to work", not only "work authorization". | The commonest US phrasing reverses the word order, so "Are you legally authorized to work in the United States?" was reported as an ordinary question on a real Discord form and would have been answerable from the bank. Found by running the new command against a live posting, not by reading the regex. |
+| 2026-08-14 | Sensitivity patterns are anchored on word boundaries, and identity for a protected question is its whole text. | A cross-model review ran the substring patterns: `age` matched "manage", `race` matched "embrace", `disab` matched "disable". It then showed that the lossy answer key could be collided deliberately, so an employer's ordinary question could be shown the user's answer to a protected one. The key still unifies phrasings; it is no longer trusted alone. |
+| 2026-08-14 | A Greenhouse board and job id must come from the same URL. | Deriving them separately let a configured board be paired with a number taken from an attacker-influenced posting URL, returning another role's questions under this role's name. A configured board that disagrees with the URL is now reported, not reconciled. |
+
+## Phase 5 notes
+
+Application tracking, status history, notes, overrides and the question bank
+shipped on 2026-08-14 (`roleeye apply record|status|note|skip|list|show`). What
+follows is the last item of the phase, added afterwards.
+
+### Form inspection
+
+`roleeye apply questions <job-id>` answers one question: *what does this
+application ask that my resume does not already say?*
+
+The value is the residue. Name, email, phone and the resume upload are already
+answered by the documents Phase 4 produces; the thing that costs an evening is
+the twelve boxes underneath them, which are largely the same twelve boxes as the
+last employer's. So the report splits them and matches only the residue against
+the bank.
+
+Coverage is narrow because reality is:
+
+| Provider | Publishes its form? |
+|---|---|
+| Greenhouse | yes — `?questions=true` on the board API |
+| Lever | no |
+| Ashby | no |
+
+All three were checked live. The alternative — rendering an apply page in a
+browser and reading its inputs — would produce a confident guess about what an
+employer asks, and the career-page adapter already refuses to do exactly that
+for postings. An unsupported provider says so and names the URL to open.
+
+Three things the form itself is not allowed to do: reach the answer bank with a
+self-identification question, survive as markup into a label, or supply a
+protected answer by resembling one. The first is a policy (EEO questions are
+per-application and are never stored), the second is §40 applied to a new
+boundary, and the third is `AnswerRepository.lookup` doing what it already did.
+
+`--save` writes each unanswered question into the bank with no answer — the
+honest state: the form asked, nothing has been said yet. Answer it once with
+`roleeye apply answer`, and the next employer asking the same thing shows it
+back.
+
+### What a cross-model review found
+
+A second model attacked the diff before it merged. Six findings were real, and
+four of them were about the same thing: the answer bank's key is *deliberately
+lossy* — that is how two phrasings of one question share a row — and lossy keys
+had become the only thing standing between a protected question and somebody
+else's answer.
+
+| Finding | What it allowed |
+|---|---|
+| Key collisions crossed the sensitivity boundary | An employer writing a question that shares a key with a protected one was shown the user's answer to the other question. A protected question now requires the *whole* question to match, and sensitivity must agree in both directions. |
+| Labels were truncated to 200 characters before the sensitivity check | "…do you require visa sponsorship?" placed past the cut read as an ordinary question. Labels are now bounded for storage, not for display; the CLI truncates when it prints. |
+| Demographics were classified by provider field name only | A voluntary "What is your sexual orientation?" added as an ordinary custom question arrives as `question_14826587008`, which matches nothing — so it was looked up in the bank and stored. Classification now reads the question too. |
+| Board and job id were derived independently | A posting URL is attacker-influenced, so a configured board could be paired with a number scraped off another URL, returning a different role's questions under this role's name. Both halves now come from one URL, and a disagreement is refused rather than resolved. |
+| `{}` was reported as "this form asks nothing" | A provider changing its response shape would have produced the most misleading output available. A payload with no question list is now unreadable, not empty. |
+| `--json` returned 0 where the text output returned 5 | Automation saw success for a run that printed "0 of 14 ready to reuse". One outcome is computed once, for both modes. |
+
+Two of the regex findings were checked by running them rather than reading
+them. The substring patterns matched `manage` (via `age`), `embrace` (via
+`race`), `disable`, `traced` and "object orientation" — five ordinary
+engineering questions refused as protected, which is how a user learns to
+ignore the protection. They are anchored on word boundaries now, and the same
+pass added the phrasings that were missing: work permit, employment
+authorization, hourly rate, wage, OTE, national origin, ancestry.
 
 ## Phase 4 notes
 

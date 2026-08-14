@@ -17,14 +17,14 @@ the technical design and implementation phases.
 
 ## Status
 
-**Phases 0, 1, 2, 2.5, 3a, 3b, 3c, 3.5, and 4 are implemented.**
+**Phases 0 through 5 are implemented.**
 
 RoleEye runs a complete deterministic loop with no model and no spend: discover
 roles, keep permanent history, filter them against your rules, screen them for
 scams, and run itself on a schedule. Add a model and it also evaluates fit,
 explains its reasoning, tailors one resume per kind of role you pursue, and
-accounts for every token. Configure it in a browser or in a terminal — both
-write the same files.
+accounts for every token. It then tracks what you actually did about it.
+Configure it in a browser or in a terminal — both write the same files.
 
 - `roleeye ui` — local configuration portal on `127.0.0.1`
 - `roleeye init --interactive` — the same setup as a terminal interview
@@ -39,6 +39,8 @@ write the same files.
 - `roleeye digest --send` — tell you about it: terminal, Windows toast, or webhook
 - `roleeye resume import <file>` — read your `.docx`/`.pdf` resume into draft facts
 - `roleeye resume generate <archetype>` — one tailored resume per kind of role
+- `roleeye apply record <job-id>` — track what you applied to, and what came of it
+- `roleeye apply questions <job-id>` — what the form asks beyond your resume
 - `roleeye stats --cost` — what has been spent, by model and by day
 - `roleeye list` / `roleeye show` — query the local record
 - `roleeye schedule install` — run it daily via Task Scheduler or cron
@@ -52,9 +54,9 @@ Evaluation is optional and off by default. You can drive it three ways:
 | **Local model** (Ollama) | a pulled model | Nothing leaves this machine. |
 | **API key** (OpenAI-compatible) | `OPENAI_API_KEY` | Fastest, priced per token. |
 
-Not implemented yet: resume tailoring, application tracking, search, and
-analytics. Those commands exit with a usage error naming the phase that will
-deliver them. See [`docs/progress.md`](./docs/progress.md) for status and
+Not implemented yet: search, analytics, and the review portal. Those commands
+exit with a usage error naming the phase that will deliver them. See
+[`docs/progress.md`](./docs/progress.md) for status and
 [`docs/vision.md`](./docs/vision.md) for where this is going.
 
 ## Layout
@@ -116,6 +118,10 @@ During development, run the CLI straight from TypeScript:
 npm run roleeye -- scan --dry-run
 ```
 
+npm consumes some flags itself — `--save` among them — so pass those to the
+built CLI or to `tsx` directly (`npx tsx src/index.ts apply questions <id>
+--save`).
+
 `roleeye init` never overwrites an existing file unless you pass `--force`.
 
 ## Commands
@@ -134,6 +140,7 @@ npm run roleeye -- scan --dry-run
 | `roleeye recommend` | The shortlist with reasons, concerns, and what to verify |
 | `roleeye digest` | Summarise what deserves attention; `--send` delivers it, `--test` proves the channels work |
 | `roleeye resume` | Fact store, role archetypes, and tailored resumes — see below |
+| `roleeye apply` | Track applications, their history, and reusable answers — see below |
 | `roleeye stats` | Counts by source and decision; `--cost` shows spend by model and day |
 | `roleeye list` | Filter stored jobs by company, title, department, source, country, date |
 | `roleeye show` | Show one job with its sources, history, reposts, and snapshots |
@@ -168,6 +175,36 @@ The rules this enforces:
 | Every claim traces to approved facts | A bullet cites fact IDs; `resume-provenance.md` shows them |
 | Nothing is invented | Numbers and named technologies must appear in the cited facts, or the claim is dropped before it reaches a document |
 | Classification is free | Assigning roles to archetypes makes no model calls, and an ambiguous posting is left unassigned rather than guessed |
+
+## Applications
+
+Nothing is ever submitted for you. What is recorded is what you did.
+
+```bash
+roleeye apply record <job-id> --referral "Dana"   # with the resume that went with it
+roleeye apply status <job-id> interviewing --note "call booked"
+roleeye apply skip <job-id> --reason "commute"     # passing is feedback too
+roleeye apply questions <job-id> --save            # what the form asks beyond the resume
+roleeye apply answer "Notice period?" --value "Four weeks"
+roleeye apply list
+```
+
+Status history is append-only, and both directions of disagreement are kept:
+applying to a role that scored badly, and passing on one that scored well. The
+second is the half most tools throw away, and it is the half that says the
+scoring is wrong.
+
+**Form inspection** reads a posting's application form and reports only what
+your resume does not already answer, matching each remaining question against
+the bank so you write it once. Greenhouse publishes its question set; Lever and
+Ashby do not, and RoleEye says so rather than guessing from a rendered page.
+
+Two rules the bank does not bend:
+
+| Rule | What it means |
+|---|---|
+| A protected question is reported, never inferred | Work authorisation, compensation, criminal history: with no stored answer it is flagged unanswered, never filled from a similar-looking previous one |
+| Self-identification is yours alone | EEO/demographic questions are shown so you know they are there, and are never stored or reused |
 
 Reading `.pdf` resumes needs `pdfjs-dist`, an optional 33 MB install
 (`npm install pdfjs-dist`). `.docx` needs nothing extra.
