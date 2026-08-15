@@ -17,17 +17,17 @@ the technical design and implementation phases.
 
 ## Status
 
-**Phases 0 through 6 are implemented.**
+**Phases 0 through 6.5 are implemented.**
 
 RoleEye runs a complete deterministic loop with no model and no spend: discover
 roles, keep permanent history, filter them against your rules, screen them for
 scams, and run itself on a schedule. Add a model and it also evaluates fit,
 explains its reasoning, tailors one resume per kind of role you pursue, and
 accounts for every token. It then tracks what you actually did about it, and
-answers questions about the record it kept. Configure it in a browser or in a
-terminal — both write the same files.
+answers questions about the record it kept. Drive it from a browser or a
+terminal — both call the same code.
 
-- `roleeye ui` — local configuration portal on `127.0.0.1`
+- `roleeye ui` — local portal: setup, review queue, applications, reports
 - `roleeye init --interactive` — the same setup as a terminal interview
 - `roleeye doctor` — validate config, database, migrations, adapters
 - `roleeye scan` — fetch Greenhouse, Lever, Ashby, and career pages
@@ -57,8 +57,8 @@ Evaluation is optional and off by default. You can drive it three ways:
 | **Local model** (Ollama) | a pulled model | Nothing leaves this machine. |
 | **API key** (OpenAI-compatible) | `OPENAI_API_KEY` | Fastest, priced per token. |
 
-Not implemented yet: the review portal, and career memory. Those are Phase 6.5
-and Phase 7. See [`docs/progress.md`](./docs/progress.md) for status and
+Not implemented yet: career memory (Phase 7) and the learning loop (Phase 8).
+See [`docs/progress.md`](./docs/progress.md) for status and
 [`docs/vision.md`](./docs/vision.md) for where this is going.
 
 ## Layout
@@ -108,6 +108,20 @@ provider. Pick companies, role families, seniority, locations, a salary floor,
 and which application systems you refuse — all by clicking. Free text is
 confined to an Advanced panel for people who want it.
 
+It has four views:
+
+| View | What it is for |
+|---|---|
+| **Setup** | What to watch, and which model reasons about it |
+| **Review** | The queue: each role with its reasoning, its concerns, and its authenticity signals. Record that you applied, or that you passed |
+| **Applications** | Every application, its append-only status history, and a search over everything ever seen |
+| **Reports** | The funnel, one segment of it, and what the model has cost |
+
+Nothing in the portal decides anything: each route calls the same function the
+CLI calls. And nothing in it can submit an application — the button reads
+*Record that I applied*, because that is all it does. Links are opened only if
+they are `https`, since the employer wrote them.
+
 Prefer a terminal? `node dist/index.js init --interactive` asks the same
 questions. Both write the same YAML, validated the same way.
 
@@ -130,7 +144,7 @@ built CLI or to `tsx` directly (`npx tsx src/index.ts apply questions <id>
 
 | Command | Description |
 |---|---|
-| `roleeye ui` | Local configuration portal; `--port`, `--no-open` |
+| `roleeye ui` | Local portal: setup, review queue, applications, reports; `--port`, `--no-open` |
 | `roleeye init` | Set up config and the database; `--interactive` asks a few questions |
 | `roleeye doctor` | Validate config, paths, database, migrations, and adapters |
 | `roleeye scan` | Fetch all enabled sources; `--source <name\|type>`, `--dry-run` |
