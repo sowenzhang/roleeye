@@ -7,7 +7,7 @@ import { runInNewContext } from 'node:vm';
 import { renderIndex } from '../../src/portal/index-page.js';
 import { createRoutes } from '../../src/portal/routes.js';
 import { ConfigService } from '../../src/portal/config-service.js';
-import { startPortal } from '../../src/portal/server.js';
+import { startPortal, type RunningPortal } from '../../src/portal/server.js';
 import { resolvePaths } from '../../src/config/paths.js';
 import { openDatabase } from '../../src/db/database.js';
 import { createRepositories } from '../../src/db/repositories/index.js';
@@ -66,10 +66,11 @@ after(() => {
   }
 });
 
-async function renderPage(): Promise<{
+async function renderPage(options: { keepOpen?: boolean; token?: string } = {}): Promise<{
   node: (id: string) => Node;
   missing: Set<string>;
   errors: unknown[];
+  portal: RunningPortal;
 }> {
   const root = mkdtempSync(path.join(tmpdir(), 'roleeye-page-'));
   mkdirSync(path.join(root, 'config'), { recursive: true });
@@ -113,29 +114,62 @@ async function renderPage(): Promise<{
           return registry.get(id);
         },
       },
-      location: { search: `?token=${portal.token}` },
+      location: { search: `?token=${options.token ?? portal.token}` },
       URLSearchParams,
       console,
       setTimeout,
+      clearTimeout,
       JSON,
       Promise,
+      // The token is not forced in here: the page reads it from the URL, and a
+      // harness that supplies the right one regardless cannot test what happens
+      // when the page holds the wrong one.
       fetch: (route: string, init?: RequestInit) =>
         fetch(`http://127.0.0.1:${portal.port}${route}`, {
           ...init,
-          headers: { 'content-type': 'application/json', 'x-roleeye-token': portal.token, ...(init?.headers ?? {}) },
+          headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
         }),
     });
 
     await new Promise((resolve) => setTimeout(resolve, 1_500));
   } finally {
     process.off('unhandledRejection', onRejection);
-    await portal.close();
+    if (!options.keepOpen) await portal.close();
   }
 
-  return { node: (id) => registry.get(id) ?? element('div'), missing, errors };
+  return { node: (id) => registry.get(id) ?? element('div'), missing, errors, portal };
 }
 
 describe('portal page', () => {
+  it('says so when its own server has gone away, instead of waiting forever', async () => {
+    const { node, portal } = await renderPage({ keepOpen: true });
+
+    // The portal was stopped while the tab stayed open — a restarted `roleeye
+    // ui`, a closed terminal, a slept laptop. Every fetch now rejects.
+    await portal.close();
+
+    const save = node('save') as { onclick?: () => void };
+    save.onclick?.();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const status = String(node('saveStatus').textContent);
+
+    assert.notEqual(status, 'Saving...', 'the word must not be left on screen forever');
+    assert.match(status, /not answering|roleeye ui/i, 'and it must say what to do about it');
+  });
+
+  it('explains a stale token instead of reporting a bare refusal', async () => {
+    // A restarted portal mints a new token, so a tab left open from the last
+    // run is refused — correctly, and unhelpfully if it only says 403.
+    const { node } = await renderPage({ token: 'a-token-from-an-earlier-run' });
+
+    const save = node('save') as { onclick?: () => void };
+    save.onclick?.();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    assert.match(String(node('saveStatus').textContent), /earlier run|roleeye ui/i);
+  });
+
   it('runs without referencing anything that does not exist', async () => {
     const { missing, errors } = await renderPage();
 

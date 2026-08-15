@@ -57,6 +57,17 @@ export function stripControlCharacters(input: string): string {
   return input.replace(CONTROL_CHARACTERS, '');
 }
 
+/**
+ * One line, safe to print.
+ *
+ * Collapsing whitespace alone is not enough for text that reaches a terminal:
+ * `\s` does not match ESC, so a posting containing `\x1b[1A` would move the
+ * cursor up and overwrite the line above its own result.
+ */
+export function singleLine(input: string): string {
+  return stripControlCharacters(input).replace(/\s+/g, ' ').trim();
+}
+
 const BLOCK_TAGS = 'p|div|section|article|header|footer|h[1-6]|ul|ol|table|tr|blockquote|pre';
 
 /** Maximum stored description length. Bounds prompt size and storage growth. */

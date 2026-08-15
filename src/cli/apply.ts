@@ -3,6 +3,8 @@ import { ExitCode, NotFoundError, UsageError, type ExitCodeValue } from '../util
 import type { Repositories } from '../db/repositories/index.js';
 import type { JobRecord } from '../db/repositories/jobs.js';
 import { addNote, pipelineSummary, recordApplication, skipRole } from '../applications/track.js';
+import { inspectForm, saveQuestions } from '../applications/form-inspect.js';
+import { createHttpClient } from '../discovery/http.js';
 import { isSensitiveQuestion } from '../db/repositories/answers.js';
 import { truncate } from '../normalize/text.js';
 import { flagBool, flagList, flagString } from './args.js';
@@ -28,7 +30,7 @@ const STATUSES: readonly ApplicationStatus[] = [
   'CLOSED',
 ];
 
-const SUBCOMMANDS = ['record', 'status', 'note', 'skip', 'list', 'show', 'answers', 'answer'] as const;
+const SUBCOMMANDS = ['record', 'status', 'note', 'skip', 'list', 'show', 'questions', 'answers', 'answer'] as const;
 
 function resolveJob(repos: Repositories, reference: string): JobRecord {
   const exact = repos.jobs.findById(reference);
@@ -46,7 +48,7 @@ export const applyCommand: Command = {
   summary: 'Track applications, their history, and reusable answers',
   usage: `roleeye apply <${SUBCOMMANDS.join('|')}> [options]`,
 
-  run(context: CommandContext): ExitCodeValue {
+  run(context: CommandContext): ExitCodeValue | Promise<ExitCodeValue> {
     const subcommand = context.args.positionals[0];
 
     if (!subcommand || !SUBCOMMANDS.includes(subcommand as (typeof SUBCOMMANDS)[number])) {
@@ -64,6 +66,8 @@ export const applyCommand: Command = {
         return skip(context);
       case 'show':
         return show(context);
+      case 'questions':
+        return questions(context);
       case 'answers':
         return listAnswers(context);
       case 'answer':
@@ -276,6 +280,103 @@ function show(context: CommandContext): ExitCodeValue {
   }
 
   return ExitCode.Ok;
+}
+
+/**
+ * What does this application ask that the resume does not already answer?
+ *
+ * Reads the published form and matches every remaining question against the
+ * bank. A protected question with no stored answer is reported as unanswered
+ * and never filled from a similar one — that judgement is not a machine's to
+ * make about somebody's immigration status.
+ */
+async function questions(context: CommandContext): Promise<ExitCodeValue> {
+  const reference = context.args.positionals[1];
+  if (!reference) throw new UsageError('usage: roleeye apply questions <job-id> [--save] [--json]');
+
+  const { repos } = context.openDb();
+  const config = context.loadConfig({ allowDefaults: true });
+  const job = resolveJob(repos, reference);
+
+  const http = createHttpClient({
+    userAgent: config.sources.defaults.user_agent,
+    timeoutMs: config.sources.defaults.timeout_ms,
+    delayMs: config.sources.defaults.request_delay_ms,
+    logger: context.logger,
+  });
+
+  const inspection = await inspectForm({ job, repos, config, http });
+  const saved = flagBool(context.args, 'save') ? saveQuestions(repos.answers, inspection) : undefined;
+
+  const unanswered = inspection.questions.filter((question) => question.lookup.status !== 'ready').length;
+
+  // One outcome, both modes. A script reading --json must not be told the run
+  // succeeded while the same run prints "12 of 14 still need an answer".
+  const outcome: ExitCodeValue =
+    !inspection.supported || unanswered > 0 ? ExitCode.CompletedWithWarnings : ExitCode.Ok;
+
+  if (context.json) {
+    printJson(context, { ...inspection, unanswered, saved });
+    return outcome;
+  }
+
+  printLine(context, `${job.companyName} — ${job.title}`);
+  printLine(context);
+
+  if (!inspection.supported) {
+    printLine(context, `  ${inspection.note ?? 'the application form could not be read'}`);
+    if (inspection.error) printLine(context, `  ${inspection.error}`);
+    if (inspection.url) printLine(context, `  ${inspection.url}`);
+    return outcome;
+  }
+
+  if (inspection.covered.length > 0) {
+    printLine(context, `  ${inspection.covered.length} field(s) your resume and profile already answer.`);
+    printLine(context);
+  }
+
+  if (inspection.questions.length === 0) {
+    printLine(context, '  Nothing beyond the resume. This one is a form and a file.');
+    if (inspection.demographic.length > 0) {
+      printLine(context, `  ${inspection.demographic.length} voluntary self-identification question(s), never stored or reused.`);
+    }
+    return outcome;
+  }
+
+  for (const question of inspection.questions) {
+    const status = question.lookup.status;
+
+    const marks = [
+      question.required ? 'required' : undefined,
+      question.options.length > 0 ? `${question.options.length} options` : undefined,
+    ].filter(Boolean);
+
+    printLine(context, `  ${truncate(question.label, 74)}${marks.length > 0 ? `  [${marks.join(', ')}]` : ''}`);
+    printLine(
+      context,
+      status === 'ready'
+        ? `      ${truncate(question.lookup.answer?.answer ?? '', 70)}`
+        : `      ${status}: ${question.lookup.detail}`,
+    );
+  }
+
+  printLine(context);
+  printLine(context, `  ${inspection.questions.length - unanswered} of ${inspection.questions.length} ready to reuse.`);
+
+  if (inspection.demographic.length > 0) {
+    printLine(
+      context,
+      `  Plus ${inspection.demographic.length} voluntary self-identification question(s) — yours alone, never stored or reused.`,
+    );
+  }
+
+  if (saved) {
+    printLine(context, `  Stored ${saved.created} new question(s) for you to answer once.`);
+  } else if (unanswered > 0) {
+    printLine(context, '  Re-run with --save to keep them, then answer each with `roleeye apply answer`.');
+  }
+
+  return outcome;
 }
 
 function listAnswers(context: CommandContext): ExitCodeValue {

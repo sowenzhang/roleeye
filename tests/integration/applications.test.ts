@@ -205,11 +205,78 @@ describe('application answers', () => {
       'Do you have the right to work in the UK?',
       'What are your salary expectations?',
       'Are you a protected veteran?',
+      // Found by inspecting a real Discord form: the commonest US phrasing puts
+      // the verb before the noun, and the original pattern only matched
+      // "work authorization".
+      'Are you legally authorized to work in the United States for our Company?',
+      'Are you eligible to work in Canada without sponsorship?',
     ]) {
       assert.equal(isSensitiveQuestion(question), true, question);
     }
 
     assert.equal(isSensitiveQuestion('What is your notice period?'), false);
+    assert.equal(isSensitiveQuestion('Are you willing to work weekends?'), false);
+  });
+
+  it('does not treat ordinary engineering questions as protected', () => {
+    // The first version of these patterns used bare substrings, so `age`
+    // matched "manage", `race` matched "embrace", `disab` matched "disable"
+    // and `orientation` matched "object orientation". A protection that fires
+    // on five ordinary questions teaches the user to ignore it.
+    for (const question of [
+      'How many people did you manage?',
+      'How do you embrace ambiguity?',
+      'Describe your experience with object orientation.',
+      'Can you disable a feature flag safely?',
+      'What is your average deploy cadence?',
+      'Tell us about a time you traced a production bug.',
+    ]) {
+      assert.equal(isSensitiveQuestion(question), false, question);
+    }
+  });
+
+  it('catches the compensation and background phrasings employers actually use', () => {
+    for (const question of [
+      'What is your expected hourly rate?',
+      'What are your wage requirements?',
+      'What is your target OTE?',
+      'Do you hold a valid work permit?',
+      'What is your national origin?',
+      'Have you ever been convicted of a felony?',
+    ]) {
+      assert.equal(isSensitiveQuestion(question), true, question);
+    }
+  });
+
+  it('never answers a protected question from one whose key merely collides', () => {
+    // `questionKey` is deliberately lossy so two phrasings share a row. An
+    // employer who knows that can write an ordinary question sharing a key with
+    // a protected one; identity for a protected question is therefore the whole
+    // question, and sensitivity must agree in both directions.
+    const filler = 'tell us about your proudest engineering achievement in detail '.repeat(4);
+
+    repos.answers.upsert({ questionText: `${filler} and your favourite tool`, answer: 'A debugger.' });
+
+    const lookup = repos.answers.lookup(`${filler} and your visa sponsorship needs`);
+
+    assert.notEqual(lookup.status, 'ready');
+    assert.equal(lookup.answer, undefined);
+  });
+
+  it('does not offer a protected answer to a differently worded protected question', () => {
+    repos.answers.upsert({
+      questionText: 'Will you now or in the future require visa sponsorship?',
+      answer: 'No',
+      confirmed: true,
+    });
+
+    const same = repos.answers.lookup('Will you now or in the future require visa sponsorship?');
+    assert.equal(same.status, 'ready');
+
+    // Same key after stop-word stripping, different question. For an ordinary
+    // question that reuse is the point; for this one it is not.
+    const other = repos.answers.lookup('Do you now or in the future require visa sponsorship');
+    assert.equal(other.answer, undefined);
   });
 
   it('gives two phrasings of the same question one key', () => {

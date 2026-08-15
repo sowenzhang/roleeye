@@ -190,7 +190,14 @@ export class EvaluationRepository {
     return mapRow(saved);
   }
 
-  /** Recommendations, best first, restricted to still-current verdicts. */
+  /**
+   * Recommendations, best first, restricted to still-current verdicts.
+   *
+   * The latest verdict is chosen by an explicit order, not by `MAX(created_at)`:
+   * two evaluations of one role saved in the same millisecond both satisfy the
+   * maximum, so the queue showed the same role twice with contradictory advice.
+   * The same tie-break was already needed for status history.
+   */
   listRecommendations(limit = 20, minimumDecision: EvaluationDecision[] = ['APPLY', 'MAYBE']): EvaluationRecord[] {
     const placeholders = minimumDecision.map(() => '?').join(',');
     const rows = this.db
@@ -200,7 +207,12 @@ export class EvaluationRepository {
          WHERE e.decision IN (${placeholders})
            AND e.stale_at IS NULL
            AND j.closed_at IS NULL
-           AND e.created_at = (SELECT MAX(created_at) FROM evaluations WHERE job_id = e.job_id)
+           AND e.id = (
+             SELECT latest.id FROM evaluations latest
+             WHERE latest.job_id = e.job_id
+             ORDER BY latest.created_at DESC, latest.rowid DESC
+             LIMIT 1
+           )
          ORDER BY e.score DESC, e.created_at DESC
          LIMIT ?`,
       )

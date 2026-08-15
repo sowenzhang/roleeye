@@ -195,9 +195,15 @@ describe('portal page', () => {
       assert.match(html, new RegExp(`id="${id}"`), `${id} must be a picker`);
     }
 
-    // Free text survives only in the advanced panel.
+    // Free text survives only where the input genuinely is free text: the two
+    // advanced scope overrides, the two search boxes, and a note. Searching is
+    // not configuration, and a note about a recruiter conversation is the one
+    // thing in this product that has no options to offer.
     const textInputs = [...html.matchAll(/<input type="text"[^>]*id="([^"]+)"/g)].map((match) => match[1]);
-    assert.deepEqual(textInputs.sort(), ['boardEntry', 'extraExcludes', 'extraTitles', 'search'].sort());
+    assert.deepEqual(
+      textInputs.sort(),
+      ['boardEntry', 'extraExcludes', 'extraTitles', 'historyQuery', 'noteText', 'search'].sort(),
+    );
   });
 
   it('contains no emoji', () => {

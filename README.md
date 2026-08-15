@@ -17,16 +17,17 @@ the technical design and implementation phases.
 
 ## Status
 
-**Phases 0, 1, 2, 2.5, 3a, 3b, 3c, 3.5, and 4 are implemented.**
+**Phases 0 through 6.5 are implemented.**
 
 RoleEye runs a complete deterministic loop with no model and no spend: discover
 roles, keep permanent history, filter them against your rules, screen them for
 scams, and run itself on a schedule. Add a model and it also evaluates fit,
 explains its reasoning, tailors one resume per kind of role you pursue, and
-accounts for every token. Configure it in a browser or in a terminal — both
-write the same files.
+accounts for every token. It then tracks what you actually did about it, and
+answers questions about the record it kept. Drive it from a browser or a
+terminal — both call the same code.
 
-- `roleeye ui` — local configuration portal on `127.0.0.1`
+- `roleeye ui` — local portal: setup, review queue, applications, reports
 - `roleeye init --interactive` — the same setup as a terminal interview
 - `roleeye doctor` — validate config, database, migrations, adapters
 - `roleeye scan` — fetch Greenhouse, Lever, Ashby, and career pages
@@ -39,7 +40,11 @@ write the same files.
 - `roleeye digest --send` — tell you about it: terminal, Windows toast, or webhook
 - `roleeye resume import <file>` — read your `.docx`/`.pdf` resume into draft facts
 - `roleeye resume generate <archetype>` — one tailored resume per kind of role
-- `roleeye stats --cost` — what has been spent, by model and by day
+- `roleeye apply record <job-id>` — track what you applied to, and what came of it
+- `roleeye apply questions <job-id>` — what the form asks beyond your resume
+- `roleeye search "<words>"` — everything recorded: postings, verdicts, notes, answers
+- `roleeye ask "<question>"` — answered from records, with the command that proves it
+- `roleeye stats` — the funnel, segments, and `--cost` for spend by model and day
 - `roleeye list` / `roleeye show` — query the local record
 - `roleeye schedule install` — run it daily via Task Scheduler or cron
 - `roleeye backup` — snapshot the authoritative database
@@ -52,9 +57,8 @@ Evaluation is optional and off by default. You can drive it three ways:
 | **Local model** (Ollama) | a pulled model | Nothing leaves this machine. |
 | **API key** (OpenAI-compatible) | `OPENAI_API_KEY` | Fastest, priced per token. |
 
-Not implemented yet: resume tailoring, application tracking, search, and
-analytics. Those commands exit with a usage error naming the phase that will
-deliver them. See [`docs/progress.md`](./docs/progress.md) for status and
+Not implemented yet: career memory (Phase 7) and the learning loop (Phase 8).
+See [`docs/progress.md`](./docs/progress.md) for status and
 [`docs/vision.md`](./docs/vision.md) for where this is going.
 
 ## Layout
@@ -92,17 +96,36 @@ Requires Node.js 22+.
 npm install
 npm run build
 
-node dist/index.js ui                     # pick companies and preferences, no typing
+npm run ui                                # the portal: setup, review, applications, reports
 node dist/index.js scan                   # real jobs from real boards
 node dist/index.js screen                 # filters + scam screening
 node dist/index.js verify <job-id>        # why it passed or failed
 node dist/index.js schedule install --at 07:30
 ```
 
+`npm run dev` on its own prints the command list, because it passes no command
+through. Use `npm run ui`, or `npm run roleeye -- <command>` for anything else.
+Note that npm keeps some flags for itself (`--save` among them), so pass those
+to the built CLI directly: `node dist/index.js apply questions <id> --save`.
+
 The portal ships with **51 company boards**, each verified live against its
 provider. Pick companies, role families, seniority, locations, a salary floor,
 and which application systems you refuse — all by clicking. Free text is
 confined to an Advanced panel for people who want it.
+
+It has four views:
+
+| View | What it is for |
+|---|---|
+| **Setup** | What to watch, and which model reasons about it |
+| **Review** | The queue: each role with its reasoning, its concerns, and its authenticity signals. Record that you applied, or that you passed |
+| **Applications** | Every application, its append-only status history, and a search over everything ever seen |
+| **Reports** | The funnel, one segment of it, and what the model has cost |
+
+Nothing in the portal decides anything: each route calls the same function the
+CLI calls. And nothing in it can submit an application — the button reads
+*Record that I applied*, because that is all it does. Links are opened only if
+they are `https`, since the employer wrote them.
 
 Prefer a terminal? `node dist/index.js init --interactive` asks the same
 questions. Both write the same YAML, validated the same way.
@@ -122,7 +145,7 @@ npm run roleeye -- scan --dry-run
 
 | Command | Description |
 |---|---|
-| `roleeye ui` | Local configuration portal; `--port`, `--no-open` |
+| `roleeye ui` | Local portal: setup, review queue, applications, reports; `--port`, `--no-open` |
 | `roleeye init` | Set up config and the database; `--interactive` asks a few questions |
 | `roleeye doctor` | Validate config, paths, database, migrations, and adapters |
 | `roleeye scan` | Fetch all enabled sources; `--source <name\|type>`, `--dry-run` |
@@ -134,7 +157,10 @@ npm run roleeye -- scan --dry-run
 | `roleeye recommend` | The shortlist with reasons, concerns, and what to verify |
 | `roleeye digest` | Summarise what deserves attention; `--send` delivers it, `--test` proves the channels work |
 | `roleeye resume` | Fact store, role archetypes, and tailored resumes — see below |
-| `roleeye stats` | Counts by source and decision; `--cost` shows spend by model and day |
+| `roleeye apply` | Track applications, their history, and reusable answers — see below |
+| `roleeye search` | Search postings, evaluations, notes, answers and outcomes; `--reindex` rebuilds |
+| `roleeye ask` | Answer a question from your records, and name the command that reproduces it |
+| `roleeye stats` | The funnel and its segments; `--cost` shows spend by model and day |
 | `roleeye list` | Filter stored jobs by company, title, department, source, country, date |
 | `roleeye show` | Show one job with its sources, history, reposts, and snapshots |
 | `roleeye schedule` | `install`, `status`, or `remove` the daily run; `--print` shows the command |
@@ -168,6 +194,78 @@ The rules this enforces:
 | Every claim traces to approved facts | A bullet cites fact IDs; `resume-provenance.md` shows them |
 | Nothing is invented | Numbers and named technologies must appear in the cited facts, or the claim is dropped before it reaches a document |
 | Classification is free | Assigning roles to archetypes makes no model calls, and an ambiguous posting is left unassigned rather than guessed |
+
+## Applications
+
+Nothing is ever submitted for you. What is recorded is what you did.
+
+```bash
+roleeye apply record <job-id> --referral "Dana"   # with the resume that went with it
+roleeye apply status <job-id> interviewing --note "call booked"
+roleeye apply skip <job-id> --reason "commute"     # passing is feedback too
+roleeye apply questions <job-id> --save            # what the form asks beyond the resume
+roleeye apply answer "Notice period?" --value "Four weeks"
+roleeye apply list
+```
+
+Status history is append-only, and both directions of disagreement are kept:
+applying to a role that scored badly, and passing on one that scored well. The
+second is the half most tools throw away, and it is the half that says the
+scoring is wrong.
+
+**Form inspection** reads a posting's application form and reports only what
+your resume does not already answer, matching each remaining question against
+the bank so you write it once. Greenhouse publishes its question set; Lever and
+Ashby do not, and RoleEye says so rather than guessing from a rendered page.
+
+Two rules the bank does not bend:
+
+| Rule | What it means |
+|---|---|
+| A protected question is reported, never inferred | Work authorisation, compensation, criminal history: with no stored answer it is flagged unanswered, never filled from a similar-looking previous one |
+| Self-identification is yours alone | EEO/demographic questions are shown so you know they are there, and are never stored or reused |
+
+## Search and analytics
+
+```bash
+roleeye search "kubernetes operators" --decision APPLY --not-applied
+roleeye search --type job-evaluation --company Ramp --since 2026-07-01
+roleeye ask "What AI roles did I see in July but skip?"
+roleeye stats --funnel --segment level
+```
+
+The index is **derived**. Every document is built from a record and carries the
+hash it came from, so `--reindex` is always safe and an unchanged corpus costs
+no writes. Five kinds of document are indexed: `job-description`,
+`job-evaluation`, `application-answer`, `interview-note` and `outcome-summary` —
+the reasoning is searchable, not only the verdict.
+
+Your words are words. FTS5's query language is unreachable from input, so
+`senior "staff" engineer (remote)` searches for those words instead of raising a
+syntax error.
+
+`stats` computes the funnel from records every time and stores no metric:
+
+```text
+discovered → in scope → screened → eligible → evaluated → recommended
+          → applied → recruiter screen → interviewing → final → offer
+```
+
+Stages past *applied* are read from the status history, so an application that
+reached a final round and was then rejected still counts as having had one. A
+rate with no denominator is reported as unknown rather than as 0%. Segment it by
+`company`, `source`, `country`, `level`, `department`, `arrangement`,
+`archetype`, `decision`, `salary_band` or `month`.
+
+`--since` is inclusive and `--until` is exclusive, so `--since 2026-07-01
+--until 2026-08-01` is July and consecutive windows never both claim the same
+record.
+
+`ask` is deterministic and calls no model. It classifies the question
+(`STRUCTURED`, `KEYWORD`, `ANALYTICS`, `HYBRID`, `SEMANTIC`), answers from
+records, and prints the command that reproduces the answer. Questions about
+resemblance are refused rather than guessed at from keyword overlap — that needs
+embeddings, which are Phase 7.
 
 Reading `.pdf` resumes needs `pdfjs-dist`, an optional 33 MB install
 (`npm install pdfjs-dist`). `.docx` needs nothing extra.

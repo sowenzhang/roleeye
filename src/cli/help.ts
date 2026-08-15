@@ -1,5 +1,6 @@
 import { ExitCode } from '../util/errors.js';
 import { addCommand } from './add.js';
+import { askCommand } from './ask.js';
 import { backupCommand } from './backup.js';
 import { doctorCommand } from './doctor.js';
 import { evaluateCommand } from './evaluate.js';
@@ -13,6 +14,7 @@ import { scanCommand } from './scan.js';
 import { scheduleCommand } from './schedule.js';
 import { scopeCommand } from './scope.js';
 import { screenCommand } from './screen.js';
+import { searchCommand } from './search.js';
 import { showCommand } from './show.js';
 import { uiCommand } from './ui.js';
 import { verifyCommand } from './verify.js';
@@ -32,6 +34,8 @@ export const commands: readonly Command[] = [
   resumeCommand,
   applyCommand,
   verifyCommand,
+  searchCommand,
+  askCommand,
   listCommand,
   showCommand,
   statsCommand,
@@ -45,9 +49,7 @@ export function findCommand(name: string | undefined): Command | undefined {
 }
 
 /** Commands documented in agent.md that later phases will implement. */
-const PLANNED: ReadonlyArray<readonly [string, string]> = [
-  ['ask', 'phase 7'],
-];
+const PLANNED: ReadonlyArray<readonly [string, string]> = [];
 
 export function isPlannedCommand(name: string): boolean {
   return PLANNED.some(([command]) => command === name);
@@ -71,16 +73,27 @@ export function printHelp(context: CommandContext, commandName?: string): void {
   printLine(context);
   printLine(context, 'Usage: roleeye <command> [options]');
   printLine(context);
+  // A wall of twenty commands answers "what can it do" and not "what do I type
+  // now", which is the only question somebody running it for the first time has.
+  printLine(context, 'Start here:');
+  printLine(context, '  roleeye ui        pick companies and preferences in a browser');
+  printLine(context, '  roleeye scan      fetch what those companies have posted');
+  printLine(context, '  roleeye screen    apply your rules and check for ghost jobs');
+  printLine(context);
+  printLine(context, '  From this checkout: npm run ui, or npm run roleeye -- scan');
+  printLine(context);
   printLine(context, 'Commands:');
   for (const entry of commands) {
     printLine(context, `  ${entry.name.padEnd(10)} ${entry.summary}`);
   }
   printLine(context);
-  printLine(context, 'Planned (not implemented yet):');
-  for (const [name, phase] of PLANNED) {
-    printLine(context, `  ${name.padEnd(14)} ${phase}`);
+  if (PLANNED.length > 0) {
+    printLine(context, 'Planned (not implemented yet):');
+    for (const [name, phase] of PLANNED) {
+      printLine(context, `  ${name.padEnd(14)} ${phase}`);
+    }
+    printLine(context);
   }
-  printLine(context);
   printLine(context, 'Global options:');
   printLine(context, '  --json          machine-readable output');
   printLine(context, '  --log-level     error | warn | info | debug');
