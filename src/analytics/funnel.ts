@@ -53,13 +53,19 @@ export interface FunnelResult {
 
 interface Window {
   since: string | undefined;
+  /**
+   * Exclusive. A month window is [the 1st, the 1st of the next month), so an
+   * application made at exactly midnight on 1 August belongs to August and to
+   * nothing else. An inclusive bound put it in July as well, and two adjacent
+   * reports that each claim the same application cannot both be right.
+   */
   until: string | undefined;
 }
 
 function windowClause(column: string, window: Window): string {
   const parts: string[] = [];
   if (window.since) parts.push(`${column} >= @since`);
-  if (window.until) parts.push(`${column} <= @until`);
+  if (window.until) parts.push(`${column} < @until`);
   return parts.length > 0 ? `AND ${parts.join(' AND ')}` : '';
 }
 

@@ -257,6 +257,10 @@ rate with no denominator is reported as unknown rather than as 0%. Segment it by
 `company`, `source`, `country`, `level`, `department`, `arrangement`,
 `archetype`, `decision`, `salary_band` or `month`.
 
+`--since` is inclusive and `--until` is exclusive, so `--since 2026-07-01
+--until 2026-08-01` is July and consecutive windows never both claim the same
+record.
+
 `ask` is deterministic and calls no model. It classifies the question
 (`STRUCTURED`, `KEYWORD`, `ANALYTICS`, `HYBRID`, `SEMANTIC`), answers from
 records, and prints the command that reproduces the answer. Questions about

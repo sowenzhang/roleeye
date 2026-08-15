@@ -306,6 +306,19 @@ describe('search queries', () => {
     assert.deepEqual(hits.map((hit) => hit.jobId), [untouched.id]);
   });
 
+  it('excludes a document sitting exactly on the upper bound', () => {
+    const job = ingest(1);
+    db.prepare('UPDATE jobs SET first_seen_at = ? WHERE id = ?').run('2026-08-01T00:00:00.000Z', job.id);
+
+    // `until` is the start of the next window, not the last instant of this
+    // one, so the two never overlap.
+    const before = search(db, { documentTypes: ['job-description'], until: '2026-08-01T00:00:00.000Z' }).hits;
+    const after = search(db, { documentTypes: ['job-description'], since: '2026-08-01T00:00:00.000Z' }).hits;
+
+    assert.equal(before.length, 0);
+    assert.equal(after.length, 1);
+  });
+
   it('hides closed roles unless asked for them', () => {
     const job = ingest(1);
     repos.jobs.close(job.id, nowIso());
@@ -438,6 +451,22 @@ describe('analytics', () => {
     assert.equal(report.counts.evaluated, 1);
     assert.equal(report.counts.recommended, 1);
     assert.equal(report.counts.interviewing, 1, 'reaching a stage twice is still one application');
+  });
+
+  it('counts a boundary instant in exactly one window', () => {
+    const job = ingest(1);
+    // The planner builds a month window as [1st of the month, 1st of the next),
+    // so an application at exactly midnight on 1 August belongs to August and
+    // to nothing else. An inclusive upper bound puts it in both months, and two
+    // adjacent reports that each claim the same application cannot both be
+    // right.
+    recordApplication(repos, job, { appliedAt: '2026-08-01T00:00:00.000Z' });
+
+    const july = funnel(db, { since: '2026-07-01T00:00:00.000Z', until: '2026-08-01T00:00:00.000Z' });
+    const august = funnel(db, { since: '2026-08-01T00:00:00.000Z', until: '2026-09-01T00:00:00.000Z' });
+
+    assert.equal(july.counts.applied, 0);
+    assert.equal(august.counts.applied, 1);
   });
 
   it('respects a time window', () => {

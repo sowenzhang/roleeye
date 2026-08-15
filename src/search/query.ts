@@ -29,6 +29,7 @@ export interface SearchFilters {
   country?: string | undefined;
   minSalary?: number | undefined;
   since?: string | undefined;
+  /** Exclusive: the start of the next window, not the last instant of this one. */
   until?: string | undefined;
   includeClosed?: boolean | undefined;
   limit?: number | undefined;
@@ -196,7 +197,8 @@ function buildQuery(filters: SearchFilters): BuiltQuery {
   }
 
   if (filters.until) {
-    conditions.push('documents.created_at <= @until');
+    // Exclusive, so consecutive windows never both claim the same record.
+    conditions.push('documents.created_at < @until');
     params['until'] = filters.until;
   }
 

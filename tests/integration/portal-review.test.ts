@@ -570,6 +570,11 @@ describe('review portal page', () => {
       `only https links may be opened, got ${JSON.stringify(opened)}`,
     );
 
+    // The page's guard matches what the server can actually emit —
+    // canonicalisation upgrades every link it keeps — so `http:` is refused
+    // rather than tolerated.
+    assert.ok(!REVIEW_SCRIPT.includes("indexOf('http://')"), 'the sink accepts https only');
+
     const queueAfter = registry.get('queue')!;
     assert.equal(queueAfter.children.length, 2, 'both recommended roles are rendered');
 

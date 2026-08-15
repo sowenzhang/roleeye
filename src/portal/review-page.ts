@@ -175,15 +175,17 @@ function line(text, className) {
 /**
  * A link the page is willing to follow.
  *
- * The server already refuses anything that is not http or https, because the
- * employer writes this string. This is the second check, at the sink, for the
- * same reason the first one exists: 'javascript:' in a link the user clicks is
- * script execution, and 'noopener' has nothing to do with it.
+ * The server already refuses anything that is not http or https, and
+ * canonicalisation upgrades every link it keeps to https — so https is what the
+ * page will ever legitimately be handed. Accepting http here would only widen
+ * the sink if the server's behaviour changed, which is the opposite of what a
+ * second layer is for. 'javascript:' in a link the user clicks is script
+ * execution, and 'noopener' has nothing to do with it.
  */
 function openable(url) {
   if (typeof url !== 'string') return undefined;
-  const lowered = url.trim().toLowerCase();
-  return lowered.indexOf('https://') === 0 || lowered.indexOf('http://') === 0 ? url.trim() : undefined;
+  const trimmed = url.trim();
+  return trimmed.toLowerCase().indexOf('https://') === 0 ? trimmed : undefined;
 }
 
 function bullets(host, label, items) {
