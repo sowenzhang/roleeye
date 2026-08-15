@@ -208,8 +208,14 @@ function button(label, className, onClick) {
 }
 
 async function loadQueue() {
-  const { payload } = await api('/api/queue');
-  review.queue = payload.items || [];
+  const result = await api('/api/queue');
+  if (!result.ok) {
+    $('queue').replaceChildren(line(reasonOf(result), 'empty'));
+    $('queueCount').textContent = '';
+    return;
+  }
+
+  review.queue = result.payload.items || [];
 
   const host = $('queue');
   host.replaceChildren();
@@ -288,7 +294,7 @@ async function decide(item, action) {
   const alert = $('alert');
   if (!ok) {
     alert.className = 'alert bad';
-    alert.textContent = payload.reason || 'Nothing was recorded.';
+    alert.textContent = reasonOf({ ok: false, payload: payload });
     return;
   }
 
@@ -308,10 +314,16 @@ async function decide(item, action) {
 }
 
 async function loadDetail(jobId) {
-  const { payload } = await api('/api/job?id=' + encodeURIComponent(jobId));
+  const result = await api('/api/job?id=' + encodeURIComponent(jobId));
+  const payload = result.payload || {};
   const host = $('detail');
   host.replaceChildren();
   review.detailJobId = jobId;
+
+  if (!result.ok && result.reachable === false) {
+    host.append(line(reasonOf(result), 'empty'));
+    return;
+  }
 
   if (!payload.job) {
     host.append(line('That role is no longer in the record.', 'empty'));
@@ -373,22 +385,29 @@ async function addNote() {
     return;
   }
 
-  const { ok, payload } = await api('/api/note', {
+  const result = await api('/api/note', {
     method: 'POST',
     body: JSON.stringify({ jobId: review.detailJobId, text: text }),
   });
 
-  alert.className = ok ? 'alert ok' : 'alert bad';
-  alert.textContent = ok ? 'Noted.' : payload.reason || 'Nothing was written.';
+  alert.className = result.ok ? 'alert ok' : 'alert bad';
+  alert.textContent = result.ok ? 'Noted.' : reasonOf(result);
 
-  if (ok) {
+  if (result.ok) {
     field.value = '';
     loadDetail(review.detailJobId);
   }
 }
 
 async function loadPipeline() {
-  const { payload } = await api('/api/pipeline');
+  const result = await api('/api/pipeline');
+  if (!result.ok) {
+    $('pipeline').replaceChildren(line(reasonOf(result), 'empty'));
+    $('pipelineCount').textContent = '';
+    return;
+  }
+
+  const payload = result.payload;
   review.pipeline = payload;
 
   $('pipeOpen').textContent = String((payload.summary && payload.summary.open) || 0);
@@ -448,25 +467,30 @@ async function loadPipeline() {
 }
 
 async function advance(jobId, status) {
-  const { ok, payload } = await api('/api/pipeline/status', {
+  const result = await api('/api/pipeline/status', {
     method: 'POST',
     body: JSON.stringify({ jobId: jobId, status: status }),
   });
 
   const alert = $('alert');
-  alert.className = ok ? 'alert ok' : 'alert bad';
-  alert.textContent = ok ? 'Recorded. The previous state is still on record.' : (payload.reason || 'Nothing changed.');
-  if (ok) loadPipeline();
+  alert.className = result.ok ? 'alert ok' : 'alert bad';
+  alert.textContent = result.ok ? 'Recorded. The previous state is still on record.' : reasonOf(result);
+  if (result.ok) loadPipeline();
 }
 
 async function loadHistory() {
   const query = $('historyQuery').value || '';
-  const { payload } = await api('/api/history?q=' + encodeURIComponent(query));
+  const result = await api('/api/history?q=' + encodeURIComponent(query));
 
   const host = $('history');
   host.replaceChildren();
 
-  const hits = payload.hits || [];
+  if (!result.ok) {
+    host.append(line(reasonOf(result), 'empty'));
+    return;
+  }
+
+  const hits = result.payload.hits || [];
   if (hits.length === 0) {
     host.append(line('Nothing matched. Every word has to appear.', 'empty'));
     return;
@@ -496,7 +520,14 @@ const RATE_LABELS = {
 };
 
 async function loadReports() {
-  const { payload } = await api('/api/reports?segment=' + encodeURIComponent(review.dimension));
+  const result = await api('/api/reports?segment=' + encodeURIComponent(review.dimension));
+  if (!result.ok) {
+    $('funnel').replaceChildren();
+    $('rates').textContent = reasonOf(result);
+    return;
+  }
+
+  const payload = result.payload;
   review.reports = payload;
 
   const counts = (payload.funnel && payload.funnel.counts) || {};

@@ -73,6 +73,15 @@ export function printHelp(context: CommandContext, commandName?: string): void {
   printLine(context);
   printLine(context, 'Usage: roleeye <command> [options]');
   printLine(context);
+  // A wall of twenty commands answers "what can it do" and not "what do I type
+  // now", which is the only question somebody running it for the first time has.
+  printLine(context, 'Start here:');
+  printLine(context, '  roleeye ui        pick companies and preferences in a browser');
+  printLine(context, '  roleeye scan      fetch what those companies have posted');
+  printLine(context, '  roleeye screen    apply your rules and check for ghost jobs');
+  printLine(context);
+  printLine(context, '  From this checkout: npm run ui, or npm run roleeye -- scan');
+  printLine(context);
   printLine(context, 'Commands:');
   for (const entry of commands) {
     printLine(context, `  ${entry.name.padEnd(10)} ${entry.summary}`);

@@ -240,12 +240,71 @@ const SCRIPT = String.raw`
 const token = new URLSearchParams(location.search).get('token') || '';
 const $ = (id) => document.getElementById(id);
 
+const UNREACHABLE =
+  'RoleEye is not answering on this port. It has probably stopped — run roleeye ui again and open the link it prints.';
+const STALE_TOKEN =
+  'This tab is holding a session token from an earlier run. Open the link roleeye ui printed most recently.';
+const TIMED_OUT =
+  'RoleEye did not answer within 15 seconds. Check the terminal it is running in.';
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Every request in this page goes through here, and this never throws.
+ *
+ * It used to. A rejected fetch — the server stopped, the laptop slept, the port
+ * changed — propagated into whichever action had just written "Saving..." into
+ * the page, and that word stayed there forever. The user is told the truth
+ * instead: the reason is in the payload, and the caller shows it.
+ *
+ * The timeout matters as much as the catch. A stopped server usually refuses
+ * the connection immediately, but a browser holding a keep-alive socket to a
+ * process that has gone away waits for the TCP timeout instead — measured at
+ * several seconds of "Saving..." with nothing to explain it.
+ */
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { 'content-type': 'application/json', 'x-roleeye-token': token, ...(options.headers || {}) },
-  });
-  return { ok: response.ok, payload: await response.json().catch(() => ({})) };
+  let response;
+  let timedOut = false;
+  let controller;
+  let timer;
+
+  if (typeof AbortController === 'function') {
+    controller = new AbortController();
+    timer = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
+  }
+
+  try {
+    response = await fetch(path, {
+      ...options,
+      ...(controller ? { signal: controller.signal } : {}),
+      headers: { 'content-type': 'application/json', 'x-roleeye-token': token, ...(options.headers || {}) },
+    });
+  } catch (error) {
+    return { ok: false, reachable: false, payload: { reason: timedOut ? TIMED_OUT : UNREACHABLE } };
+  } finally {
+    if (timer !== undefined && typeof clearTimeout === 'function') clearTimeout(timer);
+  }
+
+  const payload = await response.json().catch(() => ({}));
+
+  // A restarted portal mints a new token, so an old tab is refused. That is
+  // correct, and "403" is not an explanation anybody can act on.
+  if (response.status === 403) {
+    return { ok: false, reachable: true, payload: { ...payload, reason: STALE_TOKEN } };
+  }
+
+  return { ok: response.ok, reachable: true, payload };
+}
+
+/** The reason a request failed, in words, whatever the failure was. */
+function reasonOf() {
+  for (const result of arguments) {
+    if (result && !result.ok) {
+      const payload = result.payload || {};
+      if (payload.reason) return payload.reason;
+      if (payload.error) return payload.error;
+    }
+  }
+  return 'Nothing was written. See below.';
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -512,15 +571,21 @@ async function detect() {
   const note = $('engineNote');
   note.textContent = 'Looking for a local model...';
 
-  const { payload } = await api('/api/reasoning/detect', { method: 'POST', body: '{}' });
+  const result = await api('/api/reasoning/detect', { method: 'POST', body: '{}' });
+  const payload = result.payload || {};
   state.detected = payload;
+
+  if (!result.ok) {
+    note.textContent = reasonOf(result);
+    return;
+  }
 
   if (!payload.running) {
     note.textContent = 'No local model server found. Install Ollama to keep everything on this machine.';
     return;
   }
 
-  payload.models.forEach((name) => {
+  (payload.models || []).forEach((name) => {
     if (state.engines.some((engine) => engine.id === name)) return;
     state.engines.push({
       id: name, provider: 'ollama', label: name, note: 'Installed on this machine and ready to use.',
@@ -646,31 +711,36 @@ async function save() {
   state.selection.extraExcludes = $('extraExcludes').value.split(',').map((s) => s.trim()).filter(Boolean);
   state.selection.captureMode = $('captureMode').value;
 
-  const { ok, payload } = await api('/api/preferences', { method: 'PUT', body: JSON.stringify(state.selection) });
+  const preferences = await api('/api/preferences', { method: 'PUT', body: JSON.stringify(state.selection) });
+  const payload = preferences.payload;
 
-  const engine = await api('/api/reasoning', {
-    method: 'PUT',
-    body: JSON.stringify({
-      reasoning: state.reasoning,
-      budget: { max_cost_per_month_usd: state.monthlyBudget, max_jobs_per_scan: state.dailyLimit },
-    }),
-  });
+  // The second write is skipped when the first could not be delivered: two
+  // identical failures is not twice the information.
+  const engine = preferences.reachable === false
+    ? preferences
+    : await api('/api/reasoning', {
+        method: 'PUT',
+        body: JSON.stringify({
+          reasoning: state.reasoning,
+          budget: { max_cost_per_month_usd: state.monthlyBudget, max_jobs_per_scan: state.dailyLimit },
+        }),
+      });
 
   const problems = $('problems');
   problems.replaceChildren();
-  (payload.problems || []).concat(engine.payload.problems || []).forEach((problem) => {
+  ((payload || {}).problems || []).concat((engine.payload || {}).problems || []).forEach((problem) => {
     const line = document.createElement('div');
     line.textContent = problem.path + ': ' + problem.message;
     problems.append(line);
   });
 
-  if (ok && engine.ok) {
+  if (preferences.ok && engine.ok) {
     status.className = 'status ok';
     status.textContent = 'Saved. Run roleeye scan, or wait for the scheduled run.';
     loadStatus();
   } else {
     status.className = 'status bad';
-    status.textContent = 'Nothing was written. See below.';
+    status.textContent = reasonOf(preferences, engine);
   }
 }
 
@@ -710,13 +780,14 @@ async function preview() {
   bone.className = 'skeleton';
   host.append(bone);
 
-  const { payload } = await api('/api/scope-preview', { method: 'POST', body: JSON.stringify({}) });
+  const result = await api('/api/scope-preview', { method: 'POST', body: JSON.stringify({}) });
+  const payload = result.payload || {};
   host.replaceChildren();
 
-  if (payload.error) {
+  if (!result.ok || payload.error) {
     const line = document.createElement('div');
     line.className = 'status bad';
-    line.textContent = payload.error;
+    line.textContent = payload.error || reasonOf(result);
     host.append(line);
     return;
   }
@@ -771,9 +842,17 @@ function showInvalid(invalid) {
 }
 
 async function loadStatus() {
-  const { payload } = await api('/api/status');
+  const { ok, payload } = await api('/api/status');
+  if (!ok) return;
   $('statJobs').textContent = payload.jobs;
-  $('statSources').textContent = payload.sources.enabled;
+  $('statSources').textContent = (payload.sources || {}).enabled;
+}
+
+/** Says so when the page cannot reach its own server, rather than showing zeros. */
+function announce(text, kind) {
+  const banner = $('alert');
+  banner.className = 'alert ' + (kind || '');
+  banner.textContent = text;
 }
 
 async function load() {
@@ -783,6 +862,11 @@ async function load() {
     api('/api/catalog'),
     api('/api/reasoning'),
   ]);
+
+  if (!config.ok || !catalog.ok || !presets.ok || !reasoning.ok) {
+    announce(reasonOf(config, catalog, presets, reasoning), 'bad');
+    return;
+  }
 
   state.presets = presets.payload;
   state.catalog = catalog.payload.entries || [];
@@ -818,6 +902,16 @@ $('preview').onclick = preview;
 $('remoteOnly').onchange = (e) => { state.selection.remoteOnly = e.target.checked; renderSummary(); };
 $('rejectRelocation').onchange = (e) => { state.selection.rejectRelocation = e.target.checked; };
 $('screeningEnabled').onchange = (e) => { state.selection.screeningEnabled = e.target.checked; };
+
+// The last resort. Every request already reports its own failure; if anything
+// else ever breaks mid-action, the user is told rather than left watching a
+// word that will not change.
+if (typeof addEventListener === 'function') {
+  addEventListener('unhandledrejection', (event) => {
+    announce('Something went wrong in the page: ' + String((event && event.reason) || 'unknown error'), 'bad');
+  });
+}
+
 load();
 `;
 

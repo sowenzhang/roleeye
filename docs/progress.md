@@ -124,11 +124,54 @@ Phases are defined in `architecture.md` §33. Build one at a time. Do not skip a
 | 2026-08-14 | Only canonicalised `https` links leave the portal, `/api/decide` takes no URL from the request, and the page refuses to open any other scheme. | A cross-model review found that `source_url` is stored raw when canonicalisation fails, so `javascript:` in a posting reached the queue as the link and was passed to `open()` when the user recorded that they had applied. Three layers, because a click-to-execute sink deserves more than one. |
 | 2026-08-14 | The search index is refreshed when `roleeye ui` starts, never by a route. | `GET /api/history` was calling the default `search()`, which syncs — a write transaction over the whole corpus, from a GET, repeatable in a loop. |
 | 2026-08-14 | `listRecommendations` breaks a timestamp tie by insertion order. | `MAX(created_at)` returns both rows when two evaluations of one role land in the same millisecond, so the review queue showed the role twice with contradictory advice. The same defect had already been fixed once, in status history. |
+| 2026-08-15 | Portal requests report a reason instead of throwing, and every progress word must resolve into something. | Reported on the first real run: "Saving..." stayed on screen forever because `fetch` rejected when the portal had been stopped. The rule is now explicit — a page that says it is doing something must always say how it ended, including when the thing it is talking to has gone away. |
+| 2026-08-15 | A 403 from the portal is explained as a stale token, not reported as a refusal. | Restarting `roleeye ui` mints a new token, so the commonest real failure is an old tab. "403" tells the user nothing they can act on; "open the link roleeye ui printed most recently" does. |
+| 2026-08-15 | `npm run ui`, and the help output names the first three commands to run. | `npm run dev` passes no command through, so it printed twenty commands and no starting point — which is what the first user of this repo actually hit. |
 
 ## Phase 6.5 notes
 
 The portal stops being a setup wizard. Four views now: Setup, Review,
 Applications, Reports.
+
+### "Saving..." forever
+
+Reported by the user on the first real run, and the most instructive bug of the
+phase because none of it was new code.
+
+`api()` did not catch a rejected `fetch`. Every action that had written a
+progress word into the page — "Saving...", "Checking that board...", "Looking
+for a local model..." — left that word there permanently if the request never
+completed, and said nothing else. The trigger is ordinary: the portal was
+stopped while the tab stayed open.
+
+Three things were wrong, and the third is the one that matters:
+
+1. `api()` propagated the rejection, so every caller died mid-action.
+2. Callers assumed success anyway — `payload.sources.enabled` on a `{}` payload
+   throws, and `payload.items || []` renders "Nothing evaluated yet", which is
+   a lie about an unreachable server rather than an empty database.
+3. A restarted portal mints a new token, so the *likeliest* real failure is a
+   403 on an old tab — and "403" is not something a person can act on.
+
+`api()` now returns a stated reason instead of throwing, distinguishing an
+unreachable server, a stale token, and a timeout; every caller renders it. There
+is a 15-second timeout because a stopped server usually refuses instantly, but a
+browser holding a keep-alive socket to a process that has gone away waits for
+the TCP timeout instead — measured at several seconds of silence before the fix
+reported anything. A last-resort `unhandledrejection` handler writes to the
+alert bar, so no future action can freeze quietly.
+
+Two tests now hold this: the harness stops the portal and presses Save, and it
+runs the page with a token from an "earlier run". The harness had to stop
+forcing the correct token into every request first — it was supplying the right
+credential regardless of what the page held, which is precisely the thing that
+needed testing.
+
+**Two process lessons.** The cross-model reviews were scoped to the diff of each
+phase, so a latent defect in a file that phase did not touch was never in front
+of them. And the browser check was "does the new view render", not "what happens
+when this fails" — the failure paths were never exercised against a real server
+at all.
 
 ### Nothing new is decided in the web layer
 

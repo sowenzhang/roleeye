@@ -96,12 +96,17 @@ Requires Node.js 22+.
 npm install
 npm run build
 
-node dist/index.js ui                     # pick companies and preferences, no typing
+npm run ui                                # the portal: setup, review, applications, reports
 node dist/index.js scan                   # real jobs from real boards
 node dist/index.js screen                 # filters + scam screening
 node dist/index.js verify <job-id>        # why it passed or failed
 node dist/index.js schedule install --at 07:30
 ```
+
+`npm run dev` on its own prints the command list, because it passes no command
+through. Use `npm run ui`, or `npm run roleeye -- <command>` for anything else.
+Note that npm keeps some flags for itself (`--save` among them), so pass those
+to the built CLI directly: `node dist/index.js apply questions <id> --save`.
 
 The portal ships with **51 company boards**, each verified live against its
 provider. Pick companies, role families, seniority, locations, a salary floor,
@@ -133,10 +138,6 @@ During development, run the CLI straight from TypeScript:
 ```bash
 npm run roleeye -- scan --dry-run
 ```
-
-npm consumes some flags itself — `--save` among them — so pass those to the
-built CLI or to `tsx` directly (`npx tsx src/index.ts apply questions <id>
---save`).
 
 `roleeye init` never overwrites an existing file unless you pass `--force`.
 
