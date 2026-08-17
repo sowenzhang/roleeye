@@ -85,13 +85,14 @@ export const RUN_STYLES = String.raw`
 }
 .dot:hover { border-color:var(--faint); }
 .dot:active { transform:scale(0.9); }
-.dot[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); }
+.dot[data-filled="true"] { background:var(--accent); border-color:var(--accent); }
+.dot[role="radio"][aria-checked="true"] { box-shadow:0 0 0 2px var(--accent-dim); }
 .dot.zero {
   border-radius:6px; color:var(--faint); font:inherit; font-size:11px; line-height:1;
   margin-right:5px; background:transparent; border-color:transparent;
 }
 .dot.zero:hover { color:var(--danger); }
-.dot.zero[aria-pressed="true"] { background:transparent; border-color:transparent; }
+.dot.zero[aria-checked="true"] { background:transparent; border-color:var(--line-strong); color:var(--danger); }
 .dot:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
 pre.prompt {
@@ -124,11 +125,11 @@ export const RUN_MARKUP = String.raw`
       <div class="runbar">
         <button class="primary" id="runStart" type="button">Run now</button>
         <button class="ghost" id="runStop" type="button" disabled>Stop</button>
-        <span class="count" id="runState"></span>
+        <span class="count" id="runState" role="status" aria-live="polite"></span>
       </div>
 
       <div class="prog" id="runProgress"></div>
-      <div class="log" id="runLog"></div>
+      <div class="log" id="runLog" role="log" aria-live="polite" aria-label="Run progress"></div>
     </section>
 
     <section style="--i:1">
@@ -153,7 +154,7 @@ export const RUN_MARKUP = String.raw`
 
       <div class="runbar">
         <button class="primary" id="guidanceSave" type="button" style="min-width:150px">Save guidance</button>
-        <span class="count" id="guidanceStatus"></span>
+        <span class="count" id="guidanceStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="problems" id="guidanceProblems"></div>
 
@@ -173,7 +174,7 @@ export const RUN_MARKUP = String.raw`
         <button class="ghost" id="scheduleSave" type="button">Schedule daily</button>
       </div>
       <div><button class="ghost" id="scheduleRemove" type="button" style="margin-top:8px">Remove</button></div>
-      <div class="status" id="scheduleStatus"></div>
+      <div class="status" id="scheduleStatus" role="status" aria-live="polite"></div>
     </div>
 
     <div class="panel">
@@ -206,7 +207,10 @@ const runView = {
   minutesPerRole: undefined,
   provider: 'none',
   timer: undefined,
-  guidance: { direction: { positive: [], negative: [] }, weights: {}, decision_thresholds: {} },
+  guidance: { direction: { positive: [], negative: [] }, weights: {}, importance: {}, decision_thresholds: {} },
+  /** Edited and not yet saved, so nothing may overwrite it from the server. */
+  guidanceDirty: false,
+  guidanceLoaded: false,
   promptLoaded: false,
 };
 
@@ -507,6 +511,7 @@ function renderTags(hostId, list, onChange) {
     remove.setAttribute('aria-label', 'Remove ' + phrase);
     remove.onclick = () => {
       list.splice(index, 1);
+      runView.guidanceDirty = true;
       onChange();
     };
 
@@ -531,33 +536,40 @@ function renderGuidance() {
     const rating = importance[key];
 
     const row = el('div', 'wrow rate');
-    row.append(el('span', undefined, WEIGHT_LABEL[key] || key));
+    const name = el('span', undefined, WEIGHT_LABEL[key] || key);
+    name.id = 'rate-' + key;
+    row.append(name);
 
-    // Five dots rather than a slider: the question is "how much does this
-    // matter", which has about five useful answers, not a hundred.
+    // A radiogroup, not five toggles. Five buttons each reporting "pressed"
+    // describe five independent settings rather than one value with five
+    // positions, and a rating of zero left nothing marked as chosen at all.
     const scale = el('div', 'dots');
+    scale.setAttribute('role', 'radiogroup');
+    scale.setAttribute('aria-labelledby', 'rate-' + key);
 
-    // The leading control is "ignore this entirely", not a sixth level, so it
-    // is never shown as selected — it is an action, and the label says what
-    // happened.
-    const clear = el('button', 'dot zero', '\u00d7');
-    clear.type = 'button';
-    clear.setAttribute('aria-label', WEIGHT_LABEL[key] + ': ignore this entirely');
-    clear.onclick = () => {
-      runView.guidance.importance[key] = 0;
-      renderGuidance();
-    };
-    scale.append(clear);
-
-    for (let step = 1; step <= 5; step += 1) {
-      const dot = el('button', 'dot');
+    for (let step = 0; step <= 5; step += 1) {
+      const dot = el('button', step === 0 ? 'dot zero' : 'dot');
       dot.type = 'button';
-      dot.setAttribute('aria-pressed', String(step <= rating));
-      dot.setAttribute('aria-label', WEIGHT_LABEL[key] + ': ' + labels[step]);
-      dot.onclick = () => {
-        runView.guidance.importance[key] = step;
-        renderGuidance();
+      dot.setAttribute('role', 'radio');
+      dot.setAttribute('aria-checked', String(step === rating));
+      dot.setAttribute('aria-label', labels[step]);
+      // Only the chosen one is reachable by Tab; arrow keys move within the
+      // group, which is what a radiogroup is expected to do.
+      dot.tabIndex = step === rating ? 0 : -1;
+      if (step === 0) dot.textContent = '\u00d7';
+
+      dot.onclick = () => setRating(key, step);
+      dot.onkeydown = (event) => {
+        const back = event.key === 'ArrowLeft' || event.key === 'ArrowUp';
+        const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+        if (!back && !forward) return;
+        event.preventDefault();
+        setRating(key, Math.max(0, Math.min(5, rating + (forward ? 1 : -1))));
       };
+
+      // Filled up to the rating, which is how the scale reads visually, while
+      // the accessible state stays one selected value.
+      if (step > 0) dot.setAttribute('data-filled', String(step <= rating));
       scale.append(dot);
     }
 
@@ -597,6 +609,7 @@ function renderGuidance() {
     slider.value = String(value);
     slider.oninput = (event) => {
       runView.guidance.decision_thresholds[key] = Number(event.target.value);
+      runView.guidanceDirty = true;
       renderGuidance();
     };
 
@@ -641,6 +654,14 @@ function addPhrase(inputId, list) {
   if (value.length === 0) return;
   if (list.indexOf(value) < 0) list.push(value);
   input.value = '';
+  runView.guidanceDirty = true;
+  renderGuidance();
+}
+
+/** One place where a rating changes, so one place that records the edit. */
+function setRating(key, step) {
+  runView.guidance.importance[key] = step;
+  runView.guidanceDirty = true;
   renderGuidance();
 }
 
@@ -668,8 +689,17 @@ async function saveGuidance() {
     return;
   }
 
+  const payloadGuidance = (result.payload || {}).guidance;
+
   status.textContent = 'Saved. The next assessment uses this.';
+  // Saved, so the server copy is authoritative again and may be reloaded.
+  runView.guidanceDirty = false;
+  runView.guidanceLoaded = true;
   runView.promptLoaded = false;
+  if (payloadGuidance) {
+    runView.guidance = payloadGuidance;
+    renderGuidance();
+  }
   if ($('promptDetails').open) loadPrompt();
 }
 
@@ -693,8 +723,12 @@ async function loadPrompt() {
   }
 
   if (payload.guidance) {
-    runView.guidance = payload.guidance;
-    renderGuidance();
+    // Only when the user has nothing in flight. Opening a disclosure must not
+    // discard a rating they just moved or a phrase they just typed.
+    if (!runView.guidanceDirty) {
+      runView.guidance = payload.guidance;
+      renderGuidance();
+    }
   }
 
   if (!payload.previewAvailable) {
@@ -794,8 +828,18 @@ async function changeSchedule(action) {
     return;
   }
 
-  status.className = 'status ok';
-  status.textContent = action === 'install' ? 'Scheduled.' : 'Removed.';
+  // The endpoint reports whether anything was actually deleted. Saying
+  // "Removed." after removing nothing — or after the scheduler refused — is a
+  // confirmation the user would reasonably act on.
+  const removed = result.payload.removed !== false;
+  status.className = removed ? 'status ok' : 'status';
+  status.textContent =
+    action === 'install'
+      ? 'Scheduled.'
+      : removed
+        ? 'Removed.'
+        : 'There was nothing scheduled to remove.';
+
   if (result.payload.schedule) renderSchedule(result.payload.schedule);
   else loadSchedule();
 }
@@ -817,12 +861,14 @@ async function loadRun() {
   if (state.ok) applyRunState(state.payload);
   loadSchedule();
 
-  // Guidance without the prompt bodies: the sliders must be usable immediately,
-  // and the prompts themselves are the expensive half of that endpoint.
-  if (!runView.promptLoaded) {
-    const prompt = await api('/api/prompt');
-    if (prompt.ok && prompt.payload.guidance) {
+  // Guidance without the prompt bodies. The sliders must be usable the moment
+  // this view opens, and building every prompt to read one small object off the
+  // same endpoint meant doing the expensive half twice per visit.
+  if (!runView.guidanceLoaded && !runView.guidanceDirty) {
+    const prompt = await api('/api/prompt?guidance=only');
+    if (prompt.ok && prompt.payload.guidance && !runView.guidanceDirty) {
       runView.guidance = prompt.payload.guidance;
+      runView.guidanceLoaded = true;
       renderGuidance();
     }
   }

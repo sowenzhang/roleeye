@@ -296,8 +296,7 @@ describe('portal run routes', () => {
     assert.notEqual(criteria.budget.max_cost_per_month_usd, 9_999, 'the budget was not touched');
   });
 
-  it('refuses weights that do not total 100, with the reason', async () => {
-    const { status, body } = await call('/api/prompt', {
+  it('refuses weights that do not total 100, with the reason', async () => {    const { status, body } = await call('/api/prompt', {
       method: 'PUT',
       body: JSON.stringify({ weights: { career_direction: 90 } }),
     });
@@ -347,8 +346,7 @@ describe('portal run routes', () => {
     assert.equal(body.guidance.importance.hands_on, 0);
   });
 
-  it('reports whether there is a build for the scheduler to run', async () => {
-    // The task runs `node dist/index.js run`, not the TypeScript source. A
+  it('reports whether there is a build for the scheduler to run', async () => {    // The task runs `node dist/index.js run`, not the TypeScript source. A
     // task installed against a missing build fails at 07:30 with nobody
     // watching, which is the worst time for a silent failure.
     const { body } = await call('/api/schedule');
@@ -363,5 +361,30 @@ describe('portal run routes', () => {
 
     assert.equal(install.status, 400, 'and it refuses rather than scheduling a failure');
     assert.match(String(install.body.reason), /npm run build/i);
+  });
+
+  it('answers a bad direction with a reason, not a crash', async () => {
+    // `null` passes an `!== undefined` check and then throws on property
+    // access, turning malformed input into a 500 with nothing to act on.
+    for (const direction of [null, 'nope', ['a']]) {
+      const { status, body } = await call('/api/prompt', {
+        method: 'PUT',
+        body: JSON.stringify({ direction }),
+      });
+
+      assert.equal(status, 400, `direction ${JSON.stringify(direction)} must be refused, not thrown on`);
+      assert.match(String(body.reason), /direction must be an object/i);
+    }
+  });
+
+  it('serves the guidance without building every prompt', async () => {
+    // The Run view needs this on every visit to draw its sliders; it needs the
+    // prompts only when somebody opens the panel, which most visits never do.
+    const { status, body } = await call('/api/prompt?guidance=only');
+
+    assert.equal(status, 200);
+    assert.equal(body.guidanceOnly, true);
+    assert.ok(body.guidance.importance, 'the editable half is there');
+    assert.equal(body.requests, undefined, 'and the expensive half is not');
   });
 });

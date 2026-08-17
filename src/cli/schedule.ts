@@ -1,39 +1,8 @@
-import { execFileSync } from 'node:child_process';
 import { ExitCode, UsageError } from '../util/errors.js';
-import {
-  buildInstallCommand,
-  buildRemoveCommand,
-  buildStatusCommand,
-  detectScheduler,
-  mergeCrontab,
-  removeFromCrontab,
-  TASK_NAME,
-  type ScheduleCommand,
-} from '../schedule/os-scheduler.js';
+import { checkBuild, installSchedule, readSchedule, removeSchedule } from '../schedule/inspect.js';
+import { buildInstallCommand, buildRemoveCommand, detectScheduler, TASK_NAME } from '../schedule/os-scheduler.js';
 import { flagBool, flagString } from './args.js';
 import { printJson, printLine, type Command, type CommandContext } from './command.js';
-
-function run(command: ScheduleCommand, input?: string): string {
-  const [executable, ...args] = command.argv;
-  if (!executable) throw new Error('empty scheduler command');
-
-  return execFileSync(executable, args, {
-    encoding: 'utf8',
-    // Capture stderr rather than letting the scheduler's own error text leak
-    // past our message; "task not found" is a normal state we report ourselves.
-    stdio: ['pipe', 'pipe', 'pipe'],
-    ...(input === undefined ? {} : { input }),
-  });
-}
-
-function readCrontab(): string {
-  try {
-    return execFileSync('crontab', ['-l'], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-  } catch {
-    // No crontab yet is a normal state, not an error.
-    return '';
-  }
-}
 
 /**
  * Registers the daily run with the operating system's scheduler.
@@ -41,11 +10,17 @@ function readCrontab(): string {
  * RoleEye should work for someone who never opens a terminal again after setup,
  * which means scheduling has to be one command rather than a documentation page
  * about cron syntax. `--print` shows exactly what would be run first.
+ *
+ * Every action delegates to `schedule/inspect.ts`, the same module the portal
+ * calls. This command used to build and run its own scheduler commands, so the
+ * terminal and the portal could disagree about what was installed — and the
+ * terminal missed the check that refuses to schedule a command the build cannot
+ * run.
  */
 export const scheduleCommand: Command = {
   name: 'schedule',
   summary: 'Install, inspect, or remove the scheduled daily run',
-  usage: 'roleeye schedule <install|status|remove> [--at HH:MM] [--command "scan"] [--print] [--json]',
+  usage: 'roleeye schedule <install|status|remove> [--at HH:MM] [--command "run"] [--print] [--json]',
 
   run(context: CommandContext) {
     const action = context.args.positionals[0] ?? 'status';
@@ -58,100 +33,92 @@ export const scheduleCommand: Command = {
 
     const config = context.loadConfig({ allowDefaults: true });
     const taskName = flagString(context.args, 'name') ?? TASK_NAME;
+    const schedulerName = kind === 'windows' ? 'Task Scheduler' : 'cron';
 
     if (action === 'install') {
-      const command = buildInstallCommand({
-        time: flagString(context.args, 'at') ?? '07:30',
-        command: flagString(context.args, 'command') ?? 'scan',
-        root: config.env.paths.root,
-        nodePath: process.execPath,
-        taskName,
-      });
+      // `run` is the whole daily pass. This defaulted to `scan`, which fetches
+      // postings and then never screens or assesses them — so the user wakes up
+      // to a review queue that never fills and no reason why.
+      const at = flagString(context.args, 'at') ?? '07:30';
+      const command = flagString(context.args, 'command') ?? 'run';
+      const spec = { time: at, command, root: config.env.paths.root, nodePath: process.execPath, taskName };
 
       if (printOnly) {
-        if (context.json) printJson(context, command);
+        const preview = buildInstallCommand(spec);
+        if (context.json) printJson(context, preview);
         else {
-          printLine(context, `Would install with ${kind === 'windows' ? 'Task Scheduler' : 'cron'}:`);
+          printLine(context, `Would install with ${schedulerName}:`);
           printLine(context);
-          printLine(context, `  ${command.display}`);
+          printLine(context, `  ${preview.display}`);
         }
         return ExitCode.Ok;
       }
 
-      if (command.kind === 'cron' && command.cronLine) {
-        run(command, mergeCrontab(readCrontab(), command.cronLine, taskName));
-      } else {
-        run(command);
+      const schedule = installSchedule(spec);
+
+      if (context.json) {
+        printJson(context, schedule);
+        return ExitCode.Ok;
       }
 
-      printLine(context, `Scheduled "${taskName}" daily at ${flagString(context.args, 'at') ?? '07:30'}.`);
+      printLine(context, `Scheduled "${taskName}" daily at ${schedule.at ?? at}, running "${command}".`);
+      if (schedule.nextRun) printLine(context, `Next run ${schedule.nextRun}.`);
+      if (schedule.staleBuild) {
+        printLine(context);
+        printLine(context, 'The build is older than the source. Run `npm run build`, or the scheduled run uses old code.');
+      }
       printLine(context, 'Check it with `roleeye schedule status`, remove it with `roleeye schedule remove`.');
       return ExitCode.Ok;
     }
 
     if (action === 'remove') {
-      const command = buildRemoveCommand(taskName);
-
       if (printOnly) {
-        printLine(context, `  ${command.display}`);
+        printLine(context, `  ${buildRemoveCommand(taskName).display}`);
         return ExitCode.Ok;
       }
 
-      if (command.kind === 'cron') {
-        const current = readCrontab();
-        if (!current.includes(`# ${taskName}`)) {
-          printLine(context, 'Nothing scheduled.');
-          return ExitCode.Ok;
-        }
-        run(command, removeFromCrontab(current, taskName));
-      } else {
-        try {
-          run(command);
-        } catch {
-          printLine(context, 'Nothing scheduled.');
-          return ExitCode.Ok;
-        }
+      const result = removeSchedule(taskName);
+
+      if (context.json) {
+        printJson(context, result);
+        return ExitCode.Ok;
       }
 
-      printLine(context, `Removed "${taskName}".`);
+      printLine(context, result.removed ? `Removed "${taskName}".` : 'Nothing scheduled.');
       return ExitCode.Ok;
     }
 
-    const command = buildStatusCommand(taskName);
-    if (printOnly) {
-      printLine(context, `  ${command.display}`);
-      return ExitCode.Ok;
-    }
-
-    let output: string;
-    try {
-      output = run(command);
-    } catch {
-      printLine(context, 'Nothing scheduled. Install with `roleeye schedule install --at 07:30`.');
-      return ExitCode.Ok;
-    }
-
-    const relevant =
-      command.kind === 'cron'
-        ? output
-            .split('\n')
-            .filter((line) => line.includes(`# ${taskName}`))
-            .join('\n')
-        : output.trim();
-
-    if (relevant.trim().length === 0) {
-      printLine(context, 'Nothing scheduled. Install with `roleeye schedule install --at 07:30`.');
-      return ExitCode.Ok;
-    }
+    const schedule = readSchedule(taskName);
+    const build = checkBuild(config.env.paths.root);
 
     if (context.json) {
-      printJson(context, { scheduler: kind, taskName, detail: relevant });
+      printJson(context, { ...schedule, build });
       return ExitCode.Ok;
     }
 
-    printLine(context, `Scheduled with ${kind === 'windows' ? 'Task Scheduler' : 'cron'}:`);
+    if (!schedule.installed) {
+      printLine(context, 'Nothing scheduled. Install with `roleeye schedule install --at 07:30`.');
+      return ExitCode.Ok;
+    }
+
+    printLine(context, `Scheduled with ${schedulerName}:`);
     printLine(context);
-    for (const line of relevant.split('\n').slice(0, 20)) printLine(context, `  ${line}`);
+    if (schedule.nextRun) printLine(context, `  Next run    ${schedule.nextRun}`);
+    if (schedule.at) printLine(context, `  Daily at    ${schedule.at}`);
+    if (schedule.command) printLine(context, `  Runs        roleeye ${schedule.command}`);
+
+    if (!build.exists) {
+      printLine(context);
+      printLine(context, '  There is no build for it to run. Run `npm run build`.');
+    } else if (build.stale) {
+      printLine(context);
+      printLine(context, '  The build is older than the source, so it would run old code. Run `npm run build`.');
+    }
+
+    if (schedule.detail) {
+      printLine(context);
+      for (const line of schedule.detail.split('\n').slice(0, 20)) printLine(context, `  ${line}`);
+    }
 
     return ExitCode.Ok;
   },

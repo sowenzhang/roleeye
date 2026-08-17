@@ -103,6 +103,8 @@ export interface EvaluateSummary {
   scanCostUsd: number;
   monthCostUsd: number;
   budgetExhausted: boolean;
+  /** The stage did not run at all, because no engine is configured. */
+  skipped: boolean;
 }
 
 /**
@@ -287,6 +289,16 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     try {
       evaluate = await runEvaluateStage(options, emit, () => cancelled, (value) => { cancelled = value; });
 
+      if (evaluate.skipped) {
+        // A stage that ran and assessed nothing is not a clean run. Reporting
+        // it as one is indistinguishable from a run that found nothing worth
+        // assessing, which is the opposite conclusion.
+        warnings.push({
+          stage: 'evaluate',
+          message: 'No reasoning engine is configured, so nothing was assessed.',
+        });
+      }
+
       if (evaluate.failed > 0) {
         warnings.push({
           stage: 'evaluate',
@@ -355,6 +367,7 @@ async function runEvaluateStage(
       scanCostUsd: 0,
       monthCostUsd: BudgetGuard.monthToDateCost(repos.llmCalls),
       budgetExhausted: false,
+      skipped: true,
     };
   }
 
@@ -373,7 +386,23 @@ async function runEvaluateStage(
   });
 
   const monthCost = BudgetGuard.monthToDateCost(repos.llmCalls);
-  const budget = new BudgetGuard(config.criteria.budget, monthCost);
+
+  /**
+   * An explicit limit is the user asking for that many roles *this run*.
+   *
+   * `max_jobs_per_scan` is the default, and the guard enforces it as a hard
+   * stop — so asking for 40 against a configured default of 5 used to select
+   * 40 roles and then halt at 5, citing a limit the user had just overridden.
+   * The two spending caps are deliberately not overridable this way: a count
+   * protects time, and money needs a ceiling no picker can raise.
+   */
+  const budget = new BudgetGuard(
+    options.limit === undefined
+      ? config.criteria.budget
+      : { ...config.criteria.budget, max_jobs_per_scan: Math.max(options.limit, 0) },
+    monthCost,
+  );
+
   const provider = createProvider({ config: config.criteria.reasoning, logger });
   const evaluator = new Evaluator({ config, repos, provider, logger, budget });
 
@@ -389,6 +418,7 @@ async function runEvaluateStage(
     scanCostUsd: 0,
     monthCostUsd: monthCost,
     budgetExhausted: false,
+    skipped: false,
   };
 
   for (const [index, job] of jobs.entries()) {

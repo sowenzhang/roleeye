@@ -164,11 +164,16 @@ function viewFromHash() {
  *
  * This page swaps five sections behind one URL, so without a hash there is no
  * way to link to the review queue, reloading always lands back on setup, and
- * the back button leaves the application entirely. The hash is written rather
- * than pushed through the history API because the portal is served from a
- * token-bearing URL: a pushed path would drop the token on reload.
+ * the back button leaves the application entirely. The hash carries the view
+ * rather than the path, because the portal is served from a token-bearing URL
+ * and a pushed path would drop the token on reload.
+ *
+ * Replacement is only for normalising: the first load, an address naming a
+ * view that does not exist, and Back or Forward, which have already moved.
+ * Clicking a tab is navigation and gets its own history entry — otherwise Back
+ * leaves the portal instead of returning to the view the user came from.
  */
-function showView(name) {
+function showView(name, options) {
   review.view = name;
   for (const [id, , element] of VIEWS) {
     const host = $(element);
@@ -179,15 +184,14 @@ function showView(name) {
     if (button && button.setAttribute) button.setAttribute('aria-pressed', String(id === name));
   }
 
-  // Always normalised, including on the first load and when the address names
-  // something that is not a view: an address bar that disagrees with the page
-  // is worse than one that says nothing.
   const target = '#/' + name;
   if (location.hash !== target) {
-    // Replaces rather than pushes: a run of clicks through the tabs should not
-    // require the same number of back presses to leave the page.
-    if (typeof history !== 'undefined' && history && typeof history.replaceState === 'function') {
-      history.replaceState(null, '', (location.pathname || '') + (location.search || '') + target);
+    const replace = Boolean(options && options.replace);
+    const url = (location.pathname || '') + (location.search || '') + target;
+
+    if (typeof history !== 'undefined' && history && typeof history.pushState === 'function') {
+      if (replace) history.replaceState(null, '', url);
+      else history.pushState(null, '', url);
     } else {
       location.hash = target;
     }
@@ -651,9 +655,12 @@ $('pipelineRefresh').onclick = loadPipeline;
 $('historyGo').onclick = loadHistory;
 $('noteAdd').onclick = addNote;
 
+// A hash the user typed, or Back and Forward moving between views. Both are
+// already reflected in the address bar, so normalising is all that is left.
 if (typeof addEventListener === 'function') {
-  addEventListener('hashchange', () => showView(viewFromHash()));
+  addEventListener('hashchange', () => showView(viewFromHash(), { replace: true }));
+  addEventListener('popstate', () => showView(viewFromHash(), { replace: true }));
 }
 
-showView(viewFromHash());
+showView(viewFromHash(), { replace: true });
 `;

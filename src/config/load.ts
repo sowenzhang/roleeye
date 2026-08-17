@@ -3,7 +3,7 @@ import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { z } from 'zod';
 import { ConfigError } from '../util/errors.js';
-import { criteriaSchema, sourceSchema, sourcesSchema, syncSchema } from './schema.js';
+import { compileWeights, criteriaSchema, sourceSchema, sourcesSchema, syncSchema } from './schema.js';
 import { archetypesSchema, type ArchetypesConfig } from './archetype-schema.js';
 import type { CriteriaConfig, SourcesConfig, SyncConfig } from './schema.js';
 import { catalogEntryToSource, catalogKey, selectCatalog } from '../discovery/catalog.js';
@@ -113,7 +113,6 @@ export function loadConfig(options: LoadOptions): AppConfig {
   const declared = loadSection(env.paths.configDir, 'sources.yaml', sourcesSchema, allowDefaults, loadedFiles, missingFiles);
   const sources = { ...declared, sources: resolveSources(declared) };
   const sync = loadSection(env.paths.configDir, 'sync.yaml', syncSchema, true, loadedFiles, missingFiles);
-
   // Always defaulted: an empty archetype list is a valid state, and it is the
   // state everyone is in before they reach Phase 4.
   const archetypes = loadSection(
@@ -125,7 +124,30 @@ export function loadConfig(options: LoadOptions): AppConfig {
     missingFiles,
   );
 
-  return { env, criteria, sources, sync, archetypes, loadedFiles, missingFiles };
+  return { env, criteria: resolveWeights(criteria), sources, sync, archetypes, loadedFiles, missingFiles };
+}
+
+/**
+ * Makes `importance` authoritative wherever it is present.
+ *
+ * The two can disagree — a hand-edited file, or a `weights` block written
+ * before importance existed and edited since — and a config that shows one
+ * preference in the portal while scoring with another is the worst of both.
+ * Deriving here rather than rejecting keeps a hand-edited file loadable, and
+ * matches how sources are resolved: the file holds intent, the loader produces
+ * what the rest of the program consumes.
+ *
+ * A file with no `importance` is untouched, so weight-only configs keep working
+ * exactly as they did.
+ */
+export function resolveWeights(criteria: CriteriaConfig): CriteriaConfig {
+  if (!criteria.importance) return criteria;
+
+  const derived = compileWeights(criteria.importance);
+  const current = criteria.weights as Record<string, number>;
+  const agrees = Object.entries(derived).every(([key, value]) => current[key] === value);
+
+  return agrees ? criteria : { ...criteria, weights: derived };
 }
 
 export function enabledSources(config: AppConfig): SourcesConfig['sources'] {

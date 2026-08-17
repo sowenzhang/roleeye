@@ -74,6 +74,7 @@ async function renderPage(options: { keepOpen?: boolean; token?: string; hash?: 
   errors: unknown[];
   portal: RunningPortal;
   location: { hash: string; pathname: string; search: string };
+  history: { pushes: number; replaces: number; pushed: string[] };
 }> {
   const root = mkdtempSync(path.join(tmpdir(), 'roleeye-page-'));
   mkdirSync(path.join(root, 'config'), { recursive: true });
@@ -114,6 +115,24 @@ async function renderPage(options: { keepOpen?: boolean; token?: string; hash?: 
 
   const location = { search: `?token=${options.token ?? portal.token}`, pathname: '/', hash: options.hash ?? '' };
 
+  // A real History API, so the difference between navigating and normalising is
+  // observable. The shim previously had none, which meant every test exercised
+  // only the fallback and the Back button was never covered at all.
+  const history = {
+    pushes: 0,
+    replaces: 0,
+    pushed: [] as string[],
+    pushState(_state: unknown, _title: string, url: string) {
+      history.pushes += 1;
+      history.pushed.push(url.slice(url.indexOf('#')));
+      location.hash = url.slice(url.indexOf('#'));
+    },
+    replaceState(_state: unknown, _title: string, url: string) {
+      history.replaces += 1;
+      location.hash = url.slice(url.indexOf('#'));
+    },
+  };
+
   const errors: unknown[] = [];
   const onRejection = (error: unknown) => errors.push(error);
   process.on('unhandledRejection', onRejection);
@@ -132,6 +151,7 @@ async function renderPage(options: { keepOpen?: boolean; token?: string; hash?: 
         },
       },
       location,
+      history,
       URLSearchParams,
       console,
       setTimeout,
@@ -157,7 +177,7 @@ async function renderPage(options: { keepOpen?: boolean; token?: string; hash?: 
     if (!options.keepOpen) db.close();
   }
 
-  return { node: (id) => registry.get(id) ?? element('div'), missing, errors, portal, location };
+  return { node: (id) => registry.get(id) ?? element('div'), missing, errors, portal, location, history };
 }
 
 describe('portal page', () => {
@@ -302,15 +322,29 @@ describe('portal page', () => {
   it('gives each view its own address', async () => {
     // Four sections behind one URL means no deep link, no back button, and a
     // reload that always lands on setup.
-    const { node, location } = await renderPage();
+    const { node, location, history } = await renderPage();
 
     assert.equal(location.hash, '#/setup', 'the opening view names itself');
+    assert.equal(history.pushes, 0, 'and normalising the first load is not navigation');
 
     (node('nav-review') as { onclick?: () => void }).onclick?.();
     assert.equal(location.hash, '#/review');
 
     (node('nav-run') as { onclick?: () => void }).onclick?.();
     assert.equal(location.hash, '#/run');
+  });
+
+  it('leaves a history entry per tab, so Back returns to the last view', async () => {
+    // Replacing on every click collapses the whole session into one entry, and
+    // Back then leaves the portal entirely rather than going to the view the
+    // user came from.
+    const { node, history } = await renderPage();
+
+    (node('nav-review') as { onclick?: () => void }).onclick?.();
+    (node('nav-pipeline') as { onclick?: () => void }).onclick?.();
+
+    assert.equal(history.pushes, 2, 'two navigations, two entries');
+    assert.deepEqual(history.pushed.slice(-2), ['#/review', '#/pipeline']);
   });
 
   it('opens the view the address asks for', async () => {

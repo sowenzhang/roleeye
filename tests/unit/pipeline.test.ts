@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { isPipelineStage, PIPELINE_STAGES } from '../../src/core/pipeline.js';
 import { parseStages } from '../../src/portal/run-service.js';
 import { compileWeights, inferImportance } from '../../src/config/schema.js';
+import { BudgetGuard } from '../../src/evaluate/budget.js';
 import { nextDailyRun, parseCronLine, schtasksField } from '../../src/schedule/inspect.js';
 
 describe('pipeline stages', () => {
@@ -132,5 +133,30 @@ describe('importance compiles to weights', () => {
     assert.ok(Object.values(importance).every((value) => value >= 0 && value <= 5));
 
     assert.equal(inferImportance({ location: 0, career_direction: 30 }).location, 0, 'zero stays zero');
+  });
+
+  it('lets an explicit limit raise the run cap it would otherwise hit', () => {
+    // The picker offers 40 while the configured default is 5. Slicing 40 roles
+    // and then halting at 5 cites a limit the user has just overridden, and
+    // reads as the tool ignoring them.
+    const configured = {
+      max_jobs_per_scan: 5,
+      max_cost_per_scan_usd: 1,
+      max_cost_per_month_usd: 20,
+      on_exhausted: 'stop' as const,
+    };
+
+    const raised = new BudgetGuard({ ...configured, max_jobs_per_scan: 40 }, 0);
+    for (let i = 0; i < 6; i += 1) raised.recordJob(0);
+    assert.equal(raised.check().allowed, true, 'six roles is fine when forty were asked for');
+
+    // The count protects time; the spend caps protect money, and no picker
+    // raises those.
+    const money = new BudgetGuard({ ...configured, max_jobs_per_scan: 40 }, 0);
+    money.recordJob(5);
+    const verdict = money.check();
+
+    assert.equal(verdict.allowed, false);
+    assert.match(String((verdict as { reason: string }).reason), /spend limit/i);
   });
 });

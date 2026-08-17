@@ -33,14 +33,22 @@ export const runCommand: Command = {
 
     // Ctrl+C asks the run to stop at the next safe boundary instead of killing
     // it: a source mid-fetch would leave its run row open, and a role mid-
-    // assessment would waste a call the user has already paid for.
+    // assessment would waste a call the user has already paid for. A second
+    // one has to actually work, though — this listener suppresses Node's
+    // default exit, so without removing it "press again to force" would be a
+    // promise the program could not keep.
     const controller = new AbortController();
     const interrupt = (): void => {
-      if (!controller.signal.aborted) {
+      if (controller.signal.aborted) {
         printLine(context, '');
-        printLine(context, 'Stopping after the current step. Press Ctrl+C again to force.');
-        controller.abort();
+        printLine(context, 'Forcing exit. Work already committed is saved; the current step is not.');
+        process.off('SIGINT', interrupt);
+        process.exit(ExitCode.CompletedWithWarnings);
       }
+
+      printLine(context, '');
+      printLine(context, 'Stopping after the current step. Press Ctrl+C again to force.');
+      controller.abort();
     };
     process.on('SIGINT', interrupt);
 

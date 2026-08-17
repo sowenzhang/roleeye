@@ -176,6 +176,14 @@ export function createRunRoutes(deps: RunRouteDependencies): Record<string, Rout
     'GET /api/prompt': ({ query }) => {
       const criteria = deps.config.readCriteria().value as Record<string, any>;
 
+      // Building the prompts means reading a posting and a profile off disk and
+      // constructing an Evaluator. The Run view needs the guidance to draw its
+      // sliders on every visit; it needs the prompts only when someone opens
+      // the panel, which most visits never do.
+      if (query.get('guidance') === 'only') {
+        return ok({ previewAvailable: false, guidanceOnly: true, guidance: guidanceOf(criteria) });
+      }
+
       let config: AppConfig;
       try {
         config = deps.loadConfig();
@@ -261,13 +269,17 @@ export function createRunRoutes(deps: RunRouteDependencies): Record<string, Rout
       const criteria = document.value as Record<string, any>;
 
       if (payload['direction'] !== undefined) {
-        const direction = payload['direction'] as { positive?: unknown; negative?: unknown };
+        const direction = payload['direction'];
+        // `null` passes an `!== undefined` check and then throws on property
+        // access, turning a malformed body into a 500 rather than an answer.
+        if (typeof direction !== 'object' || direction === null || Array.isArray(direction)) {
+          return badRequest({ saved: false, reason: 'direction must be an object with positive and negative lists' });
+        }
+
+        const { positive, negative } = direction as { positive?: unknown; negative?: unknown };
         criteria['preferences'] = {
           ...criteria['preferences'],
-          direction: {
-            positive: phrases(direction.positive),
-            negative: phrases(direction.negative),
-          },
+          direction: { positive: phrases(positive), negative: phrases(negative) },
         };
       }
 

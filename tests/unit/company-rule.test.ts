@@ -170,4 +170,71 @@ discovery:
     const root = workspace('version: 1\nsources: []\n');
     assert.deepEqual(loadConfig({ root }).sources.sources, []);
   });
+
+  it('lets importance win when a hand-edited file disagrees with its weights', () => {
+    // The portal shows importance and scoring reads weights. A file where they
+    // disagree displays one preference and scores with another, and the user
+    // has no way to see which one is winning.
+    const root = mkdtempSync(path.join(tmpdir(), 'roleeye-rule-'));
+    mkdirSync(path.join(root, 'config'), { recursive: true });
+    workspaces.push(root);
+
+    writeFileSync(path.join(root, 'config', 'sources.yaml'), 'version: 1\nsources: []\n');
+    writeFileSync(
+      path.join(root, 'config', 'criteria.yaml'),
+      `version: 1
+weights:
+  career_direction: 100
+  hands_on: 0
+  product_customer: 0
+  ai_relevance: 0
+  technical_domain: 0
+  location: 0
+  compensation: 0
+importance:
+  career_direction: 5
+  hands_on: 5
+  product_customer: 5
+  ai_relevance: 5
+  technical_domain: 5
+  location: 5
+  compensation: 5
+`,
+    );
+
+    const weights = loadConfig({ root }).criteria.weights;
+
+    assert.notEqual(weights.career_direction, 100, 'the stale weights are not what scoring gets');
+    assert.equal(
+      Object.values(weights).reduce((sum, value) => sum + value, 0),
+      100,
+      'and what it does get is still valid',
+    );
+    assert.ok(weights.hands_on > 0, 'every category rated equally is scored equally');
+  });
+
+  it('leaves a weights-only file exactly as written', () => {
+    // Files predate importance. Deriving over them would silently change how
+    // somebody's existing configuration scores.
+    const root = mkdtempSync(path.join(tmpdir(), 'roleeye-rule-'));
+    mkdirSync(path.join(root, 'config'), { recursive: true });
+    workspaces.push(root);
+
+    writeFileSync(path.join(root, 'config', 'sources.yaml'), 'version: 1\nsources: []\n');
+    writeFileSync(
+      path.join(root, 'config', 'criteria.yaml'),
+      `version: 1
+weights:
+  career_direction: 40
+  hands_on: 10
+  product_customer: 10
+  ai_relevance: 10
+  technical_domain: 10
+  location: 10
+  compensation: 10
+`,
+    );
+
+    assert.equal(loadConfig({ root }).criteria.weights.career_direction, 40);
+  });
 });
