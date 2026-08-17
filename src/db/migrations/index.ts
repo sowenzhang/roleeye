@@ -7,6 +7,7 @@ import { migration005 } from './005-facts-and-artifacts.js';
 import { migration006 } from './006-fact-identity.js';
 import { migration007 } from './007-applications.js';
 import { migration008 } from './008-search-index.js';
+import { migration009 } from './009-run-lock.js';
 import { nowIso } from '../../util/time.js';
 import type { Logger } from '../../util/logger.js';
 
@@ -20,6 +21,7 @@ export const migrations: readonly Migration[] = [
   migration006,
   migration007,
   migration008,
+  migration009,
 ];
 
 export type { Migration };

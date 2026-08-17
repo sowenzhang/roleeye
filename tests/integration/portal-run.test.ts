@@ -6,6 +6,8 @@ import { after, before, describe, it } from 'node:test';
 import { createRunRoutes } from '../../src/portal/run-routes.js';
 import { RunService } from '../../src/portal/run-service.js';
 import { ConfigService } from '../../src/portal/config-service.js';
+import { runPipeline } from '../../src/core/pipeline.js';
+import { acquireRunLock } from '../../src/core/run-lock.js';
 import { startPortal, type RunningPortal } from '../../src/portal/server.js';
 import { resolvePaths } from '../../src/config/paths.js';
 import { loadConfig } from '../../src/config/load.js';
@@ -186,6 +188,55 @@ describe('portal run routes', () => {
 
     assert.equal(body.cancelling, false);
     assert.match(String(body.reason), /nothing is running/i);
+  });
+
+  it('refuses to run alongside another process, and says which', async () => {
+    // The in-memory guard only covers this process. The scheduled run at 07:30
+    // is a different one, and two at once would interleave source runs and
+    // apply the per-run spending cap twice over the same window.
+    const held = acquireRunLock(db, 'cli');
+    assert.equal(held.ok, true);
+    if (!held.ok) return;
+
+    try {
+      const refused = await call('/api/run', { method: 'POST', body: JSON.stringify({ stages: ['screen'] }) });
+
+      assert.equal(refused.status, 409);
+      assert.equal(refused.body.started, false);
+      assert.match(String(refused.body.reason), /another roleeye run/i);
+      assert.match(String(refused.body.reason), /cli/, 'and it names what is holding it');
+    } finally {
+      held.lock.release();
+    }
+
+    const allowed = await call('/api/run', { method: 'POST', body: JSON.stringify({ stages: ['screen'] }) });
+    assert.equal(allowed.body.started, true, 'and lets it through once the other finishes');
+    await settle();
+  });
+
+  it('does nothing at all when the pipeline itself loses the race', async () => {
+    // The portal's up-front check is advisory; the atomic claim inside the
+    // pipeline is what decides, and it must leave no half-run behind.
+    const held = acquireRunLock(db, 'portal');
+    assert.equal(held.ok, true);
+    if (!held.ok) return;
+
+    try {
+      const result = await runPipeline({
+        config: loadConfig({ root }),
+        db,
+        repos: createRepositories(db),
+        logger: silentLogger,
+        stages: ['scan', 'screen'],
+      });
+
+      assert.equal(result.status, 'busy');
+      assert.equal(result.scan, undefined, 'no stage ran');
+      assert.equal(result.screen, undefined);
+      assert.match(String(result.errors[0]?.message), /another roleeye run/i);
+    } finally {
+      held.lock.release();
+    }
   });
 
   it('reports the schedule, including when there is not one', async () => {

@@ -11,6 +11,7 @@ import { BudgetGuard } from '../evaluate/budget.js';
 import { rankForEvaluation, type RankedJob } from '../evaluate/priority.js';
 import { criteriaHash as criteriaHashOf } from '../evaluate/criteria.js';
 import { createProvider } from '../reasoning/registry.js';
+import { acquireRunLock } from './run-lock.js';
 
 /**
  * The daily run, as one sequence.
@@ -62,13 +63,18 @@ export interface PipelineOptions {
   only?: string[] | undefined;
   signal?: AbortSignal | undefined;
   onEvent?: ((event: PipelineEvent) => void) | undefined;
+  /** Names this process in the lock file, so a refusal can say who holds it. */
+  kind?: string | undefined;
 }
 
 export interface PipelineResult {
   startedAt: string;
   finishedAt: string;
-  /** `cancelled` means the user stopped it; work already committed still stands. */
-  status: 'ok' | 'warning' | 'failed' | 'cancelled';
+  /**
+   * `cancelled` means the user stopped it; work already committed still stands.
+   * `busy` means another process was already running and this one did nothing.
+   */
+  status: 'ok' | 'warning' | 'failed' | 'cancelled' | 'busy';
   scan: ScanSummary | undefined;
   screen: ScreenSummary | undefined;
   evaluate: EvaluateSummary | undefined;
@@ -137,6 +143,37 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     }
   };
 
+  /**
+   * Taken here, not by the caller, so nothing can run this pipeline without it.
+   *
+   * The portal, `roleeye run`, and the scheduled task are three separate
+   * processes with no knowledge of each other, and two of them running at once
+   * would interleave source runs and apply the per-run spending cap twice.
+   */
+  const claim = acquireRunLock(db, options.kind ?? 'cli');
+  if (!claim.ok) {
+    // No event is emitted. Nothing ran, so there is no stage to report on, and
+    // the caller states the refusal in its own words — a listener echoing it
+    // first only produced the same sentence twice.
+    return {
+      startedAt,
+      finishedAt: nowIso(),
+      status: 'busy',
+      scan: undefined,
+      screen: undefined,
+      evaluate: undefined,
+      errors: [{ stage: options.stages[0] ?? 'scan', message: claim.reason }],
+      warnings: [],
+    };
+  }
+
+  try {
+    return await execute();
+  } finally {
+    claim.lock.release();
+  }
+
+  async function execute(): Promise<PipelineResult> {
   const wanted = new Set(options.stages);
   let scan: ScanSummary | undefined;
   let screen: ScreenSummary | undefined;
@@ -280,6 +317,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
         : 'ok';
 
   return { startedAt, finishedAt: nowIso(), status, scan, screen, evaluate, errors, warnings };
+  }
 }
 
 /**

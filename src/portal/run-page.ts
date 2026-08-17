@@ -420,6 +420,7 @@ function applyRunState(snapshot) {
     warning: 'finished, with something to look at',
     failed: 'failed',
     cancelled: 'stopped',
+    busy: 'another run was already going, so this one did nothing',
   };
 
   label.textContent = running

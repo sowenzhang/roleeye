@@ -76,6 +76,9 @@ export const runCommand: Command = {
 
       if (context.json) {
         printJson(context, result);
+      } else if (result.status === 'busy') {
+        printLine(context, result.errors[0]?.message ?? 'Another RoleEye run is in progress.');
+        printLine(context, 'Nothing was changed. Wait for it to finish, or stop it, then try again.');
       } else {
         printLine(context);
         for (const warning of result.warnings) {
@@ -91,6 +94,11 @@ export const runCommand: Command = {
         );
       }
 
+      // A refusal is not a failure of this invocation — the work is being done
+      // by whoever holds the lock — but it is not a clean run either. A
+      // scheduled task that keeps colliding with a portal session must be
+      // visible, not recorded as a success that quietly did nothing.
+      if (result.status === 'busy') return ExitCode.CompletedWithWarnings;
       if (result.status === 'failed') return ExitCode.UnexpectedError;
       if (result.status === 'warning') return ExitCode.CompletedWithWarnings;
       return ExitCode.Ok;

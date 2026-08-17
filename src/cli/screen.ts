@@ -1,5 +1,6 @@
 import { ExitCode } from '../util/errors.js';
 import { runScreening } from '../evaluate/screen.js';
+import { withRunLock } from './with-lock.js';
 import { flagBool, flagNumber } from './args.js';
 import { printJson, printLine, type Command, type CommandContext } from './command.js';
 
@@ -16,8 +17,11 @@ export const screenCommand: Command = {
 
   run(context: CommandContext) {
     const config = context.loadConfig();
-    const { repos } = context.openDb();
+    const { db, repos } = context.openDb();
 
+    // Writes screenings, and a scan running underneath it would be deciding
+    // about roles that are still arriving.
+    return withRunLock(context, db, 'screen', () => {
     const summary = runScreening(repos, {
       criteria: config.criteria,
       force: flagBool(context.args, 'force'),
@@ -56,5 +60,6 @@ export const screenCommand: Command = {
     );
 
     return ExitCode.Ok;
+    });
   },
 };

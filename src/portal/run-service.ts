@@ -11,6 +11,7 @@ import {
   type PipelineResult,
   type PipelineStage,
 } from '../core/pipeline.js';
+import { describeLock, readRunLock } from '../core/run-lock.js';
 
 /**
  * One run at a time, and its progress.
@@ -54,7 +55,7 @@ export interface RunState {
   runId: string | undefined;
   startedAt: string | undefined;
   finishedAt: string | undefined;
-  status: 'idle' | 'running' | 'ok' | 'warning' | 'failed' | 'cancelled' | 'error';
+  status: 'idle' | 'running' | 'ok' | 'warning' | 'failed' | 'cancelled' | 'error' | 'busy';
   /** Set when the run could not start at all, such as unreadable configuration. */
   error: string | undefined;
   cancelRequested: boolean;
@@ -119,6 +120,14 @@ export class RunService {
     if (this.state.running) {
       return { started: false, reason: 'A run is already in progress.', state: this.snapshot() };
     }
+
+    // The in-memory flag above only knows about this process. The scheduled
+    // task and any terminal are separate processes, and the lock is what makes
+    // "one run at a time" true across all of them. Checked here so the page can
+    // refuse with a useful message rather than starting something that dies a
+    // moment later; the atomic claim inside the pipeline still decides.
+    const foreign = this.foreignRun();
+    if (foreign) return { started: false, reason: foreign, state: this.snapshot() };
 
     const stages = parseStages(request.stages);
     const limit =
@@ -194,6 +203,18 @@ export class RunService {
     return this.state.stages.find((stage) => stage.status === 'running')?.stage;
   }
 
+  /** A run held by another process, described, or nothing. */
+  private foreignRun(): string | undefined {
+    try {
+      const held = readRunLock(this.deps.openDb().db);
+      return held ? describeLock(held) : undefined;
+    } catch {
+      // An unopenable database will fail the run itself with a better message
+      // than this one could give.
+      return undefined;
+    }
+  }
+
   private async execute(options: {
     stages: PipelineStage[];
     limit: number | undefined;
@@ -220,10 +241,24 @@ export class RunService {
         ...(options.only ? { only: options.only } : {}),
         signal: options.signal,
         onEvent: (event) => this.append(event),
+        kind: 'portal',
       });
 
       this.state.result = result;
       this.state.status = result.status;
+
+      // The pipeline emits nothing when it loses the race for the lock, so the
+      // page would otherwise show a finished run with an empty log.
+      if (result.status === 'busy') {
+        const reason = result.errors[0]?.message ?? 'Another RoleEye run is in progress.';
+        this.state.error = reason;
+        this.state.log.push({
+          at: new Date().toISOString(),
+          stage: options.stages[0] ?? 'scan',
+          kind: 'stage-skipped',
+          message: reason,
+        });
+      }
     } catch (error) {
       const message = errorMessage(error);
       this.state.status = 'error';
