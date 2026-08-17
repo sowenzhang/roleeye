@@ -196,13 +196,24 @@ describe('portal page', () => {
     }
 
     // Free text survives only where the input genuinely is free text: the two
-    // advanced scope overrides, the two search boxes, and a note. Searching is
-    // not configuration, and a note about a recruiter conversation is the one
-    // thing in this product that has no options to offer.
+    // advanced scope overrides, the two search boxes, a note, and the two
+    // direction phrases. Searching is not configuration; a note about a
+    // recruiter conversation is the one thing in this product that has no
+    // options to offer; and the direction phrases are prose that goes into the
+    // prompt verbatim, so there is nothing to offer options from.
     const textInputs = [...html.matchAll(/<input type="text"[^>]*id="([^"]+)"/g)].map((match) => match[1]);
     assert.deepEqual(
       textInputs.sort(),
-      ['boardEntry', 'extraExcludes', 'extraTitles', 'historyQuery', 'noteText', 'search'].sort(),
+      [
+        'boardEntry',
+        'dirNegativeInput',
+        'dirPositiveInput',
+        'extraExcludes',
+        'extraTitles',
+        'historyQuery',
+        'noteText',
+        'search',
+      ].sort(),
     );
   });
 

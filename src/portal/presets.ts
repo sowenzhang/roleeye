@@ -168,8 +168,23 @@ export interface PresetSelection {
   rejectRelocation: boolean;
   screeningEnabled: boolean;
   captureMode: 'scoped' | 'full' | 'history';
-  /** Catalog entries as `type:token`, chosen from the picker. */
-  catalog?: string[];
+  /**
+   * Which companies to watch, as a rule.
+   *
+   * Replaces the list of catalog entries this used to carry. A list was a
+   * snapshot of the catalog on the day it was saved; a rule keeps matching as
+   * the catalog grows, and only the companies the user singled out by hand end
+   * up named anywhere.
+   */
+  companySize?: string[];
+  companyOwnership?: string[];
+  companySectors?: string[];
+  /** Watched whatever the rule says, as `type:token`. */
+  companyInclude?: string[];
+  /** Never watched, even when the rule matches. */
+  companyExclude?: string[];
+  /** Boards added by URL, which no catalog rule can describe. */
+  customBoards?: Array<Record<string, unknown>>;
   /** Free-text additions from the Advanced panel. */
   extraTitles: string[];
   extraExcludes: string[];
@@ -211,13 +226,12 @@ export function compileSelection(selection: PresetSelection): CompiledConfig {
   ];
 
   const scope: Record<string, unknown> = {
-    titles: { include: titles, exclude: excludes, patterns: [] },
-    levels: { include: [], exclude: excludedLevels },
+    titles: { include: titles, exclude: excludes },
+    levels: { exclude: excludedLevels },
     locations: {
       countries,
       metros: selection.metros,
       remote_only: selection.remoteOnly,
-      exclude: [],
     },
   };
 
@@ -225,9 +239,7 @@ export function compileSelection(selection: PresetSelection): CompiledConfig {
 
   const hardFilters: Record<string, unknown> = {
     countries,
-    require_us_payroll: false,
     relocation: { reject_if_required: selection.rejectRelocation },
-    on_unknown: { salary: 'flag', country: 'flag' },
   };
 
   if (selection.salaryFloor > 0) {
@@ -237,10 +249,18 @@ export function compileSelection(selection: PresetSelection): CompiledConfig {
   return {
     scope,
     hardFilters,
+    /**
+     * Only what this page actually asks about.
+     *
+     * Emitting a field the page has no control over means resetting it on
+     * every save. `direction` is edited on the Run view, and returning an
+     * empty one here silently erased whatever the user had written there the
+     * next time they pressed Save on this page. `require_us_payroll` and
+     * `on_unknown` were the same: constants, overwriting real answers.
+     */
     preferences: {
       work_arrangement: { preferred: selection.remoteOnly ? ['remote'] : ['remote', 'hybrid'] },
       application_system: { deny: selection.refuseSystems },
-      direction: { positive: [], negative: [] },
     },
   };
 }

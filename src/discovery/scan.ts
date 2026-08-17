@@ -48,6 +48,23 @@ export interface ScanSummary {
   };
 }
 
+/**
+ * One step of a scan, as it happens.
+ *
+ * A scan over a dozen boards is tens of seconds of silence otherwise, and a
+ * user watching a progress bar needs to know which board is slow, not merely
+ * that something is happening.
+ */
+export interface ScanProgress {
+  phase: 'source-start' | 'source-done';
+  sourceName: string;
+  sourceType: string;
+  /** 1-based position of this source in the run. */
+  index: number;
+  total: number;
+  summary?: SourceScanSummary | undefined;
+}
+
 export interface ScanOptions {
   config: AppConfig;
   db: Database;
@@ -57,6 +74,14 @@ export interface ScanOptions {
   only?: string[] | undefined;
   dryRun?: boolean | undefined;
   http?: HttpClient | undefined;
+  onProgress?: ((update: ScanProgress) => void) | undefined;
+  /**
+   * Stops before the next source once aborted.
+   *
+   * A source already in flight is allowed to finish: abandoning it midway
+   * would leave its run row open and could retire roles it had not re-seen.
+   */
+  signal?: AbortSignal | undefined;
 }
 
 /** Cheap title filters keep obviously irrelevant postings out of the pipeline. */
@@ -115,7 +140,23 @@ export async function runScan(options: ScanOptions): Promise<ScanSummary> {
   const scanId = options.dryRun ? `scan_dry_${Date.now().toString(16)}` : repos.scans.startScan();
   const summaries: SourceScanSummary[] = [];
 
+  const report = (update: ScanProgress): void => {
+    try {
+      options.onProgress?.(update);
+    } catch (error) {
+      // A progress listener is a display concern; it must never fail a scan.
+      logger.debug('scan progress listener threw', { error: errorMessage(error) });
+    }
+  };
+
+  let index = 0;
+
   for (const source of sources) {
+    if (options.signal?.aborted) break;
+
+    index += 1;
+    report({ phase: 'source-start', sourceName: source.name, sourceType: source.type, index, total: sources.length });
+
     const adapter = getAdapter(source.type);
     const runId = options.dryRun ? undefined : repos.scans.startSourceRun(scanId, source.name, source.type);
     const sourceLogger = logger.child({ source: source.name });
@@ -151,6 +192,14 @@ export async function runScan(options: ScanOptions): Promise<ScanSummary> {
         });
       }
       summaries.push(summary);
+      report({
+        phase: 'source-done',
+        sourceName: source.name,
+        sourceType: source.type,
+        index,
+        total: sources.length,
+        summary,
+      });
       continue;
     }
 
@@ -212,6 +261,14 @@ export async function runScan(options: ScanOptions): Promise<ScanSummary> {
     }
 
     summaries.push(summary);
+    report({
+      phase: 'source-done',
+      sourceName: source.name,
+      sourceType: source.type,
+      index,
+      total: sources.length,
+      summary,
+    });
   }
 
   const failed = summaries.filter((entry) => entry.status === 'failed').length;

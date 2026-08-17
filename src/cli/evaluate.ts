@@ -3,8 +3,9 @@ import type { Repositories } from '../db/repositories/index.js';
 import type { JobRecord } from '../db/repositories/jobs.js';
 import { Evaluator } from '../evaluate/evaluator.js';
 import { BudgetGuard } from '../evaluate/budget.js';
-import { largeRunWarning, rankForEvaluation, type RankedJob } from '../evaluate/priority.js';
-import { criteriaHash as criteriaHashOf } from '../evaluate/criteria.js';
+import { largeRunWarning } from '../evaluate/priority.js';
+import { rankEligible } from '../core/pipeline.js';
+import { withRunLock } from './with-lock.js';
 import { createProvider, describeProvider, isLocalProvider } from '../reasoning/registry.js';
 import { truncate } from '../normalize/text.js';
 import { flagBool, flagNumber, flagString } from './args.js';
@@ -41,7 +42,7 @@ export const evaluateCommand: Command = {
 
   async run(context: CommandContext) {
     const config = context.loadConfig();
-    const { repos } = context.openDb();
+    const { db, repos } = context.openDb();
 
     const reference = context.args.positionals[0];
     const all = flagBool(context.args, 'all') || reference === undefined;
@@ -60,9 +61,14 @@ export const evaluateCommand: Command = {
         printLine(context, 'Nothing stored to preview. Run `roleeye scan` first.');
         return ExitCode.Ok;
       }
+      // Nothing is sent and nothing is written, so there is nothing to serialise.
       return describeDryRun(context, evaluator, job, config);
     }
 
+    // The only command that spends money, and the only one where overlapping
+    // another run means paying twice: each process builds its own budget guard,
+    // so a per-run cap would apply once to each.
+    return withRunLock(context, db, 'evaluate', async () => {
     const limit = flagNumber(context.args, 'limit') ?? config.criteria.budget.max_jobs_per_scan;
     const candidates = reference ? [] : rankEligible(repos, config);
     const jobs = reference ? [resolveJob(repos, reference)] : candidates.slice(0, limit).map((entry) => entry.job);
@@ -130,28 +136,9 @@ export const evaluateCommand: Command = {
     );
 
     return ExitCode.Ok;
+    });
   },
 };
-
-/**
- * The roles most likely to repay an expensive call, best first.
- *
- * The cap exists so a daily run finishes. Ordering exists so the cap keeps the
- * best roles rather than whichever ones the database happened to return first.
- * One function produces the candidate set so the count the user is shown and
- * the list actually evaluated can never disagree.
- */
-function rankEligible(repos: Repositories, config: ReturnType<CommandContext['loadConfig']>): RankedJob[] {
-  const criteriaHash = criteriaHashOf(config.criteria);
-  const screeningFor = (jobId: string) => repos.screenings.findCurrent(jobId, criteriaHash);
-
-  const candidates = repos.jobs
-    .list({ inScope: true, limit: 500 })
-    // A role the screener rejected is not a candidate; an unscreened one still is.
-    .filter((job) => screeningFor(job.id)?.eligible !== false);
-
-  return rankForEvaluation(candidates, screeningFor);
-}
 
 /**
  * Measured: an agent CLI takes minutes per role, an API a few seconds.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { CATALOG, CATEGORY_LABELS, catalogEntryToSource } from '../../src/portal/catalog.js';
+import { CATALOG, CATEGORY_LABELS, catalogEntryToSource } from '../../src/discovery/catalog.js';
 import {
   compileSelection,
   inferSelection,

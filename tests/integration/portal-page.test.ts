@@ -6,6 +6,8 @@ import { after, describe, it } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { renderIndex } from '../../src/portal/index-page.js';
 import { createRoutes } from '../../src/portal/routes.js';
+import { createRunRoutes } from '../../src/portal/run-routes.js';
+import { RunService } from '../../src/portal/run-service.js';
 import { ConfigService } from '../../src/portal/config-service.js';
 import { startPortal, type RunningPortal } from '../../src/portal/server.js';
 import { resolvePaths } from '../../src/config/paths.js';
@@ -66,11 +68,13 @@ after(() => {
   }
 });
 
-async function renderPage(options: { keepOpen?: boolean; token?: string } = {}): Promise<{
+async function renderPage(options: { keepOpen?: boolean; token?: string; hash?: string } = {}): Promise<{
   node: (id: string) => Node;
   missing: Set<string>;
   errors: unknown[];
   portal: RunningPortal;
+  location: { hash: string; pathname: string; search: string };
+  history: { pushes: number; replaces: number; pushed: string[] };
 }> {
   const root = mkdtempSync(path.join(tmpdir(), 'roleeye-page-'));
   mkdirSync(path.join(root, 'config'), { recursive: true });
@@ -83,19 +87,51 @@ async function renderPage(options: { keepOpen?: boolean; token?: string } = {}):
   const missing = new Set<string>();
   for (const match of html.matchAll(/id="([^"]+)"/g)) registry.set(match[1]!, element('div'));
 
+  const db = openDatabase({ path: ':memory:' });
+  const openDb = () => ({ db, repos: createRepositories(db) });
+  const config = new ConfigService(paths);
+  const loadConfig = () => {
+    throw new Error('the page must not need a loaded config to render');
+  };
+
   const portal = await startPortal({
     port: 0,
     logger: silentLogger,
     index: renderIndex,
-    routes: createRoutes({
-      config: new ConfigService(paths),
-      logger: silentLogger,
-      loadConfig: () => {
-        throw new Error('the page must not need a loaded config to render');
-      },
-      openDb: () => ({ repos: createRepositories(openDatabase({ path: ':memory:' })) }),
-    }),
+    routes: {
+      ...createRoutes({ config, logger: silentLogger, loadConfig, openDb }),
+      // The run view polls on load, so its routes have to be here or the page
+      // would be tested against a 404 it happens to survive.
+      ...createRunRoutes({
+        logger: silentLogger,
+        runs: new RunService({ logger: silentLogger, loadConfig, openDb }),
+        config,
+        loadConfig,
+        openDb,
+        root,
+      }),
+    },
   });
+
+  const location = { search: `?token=${options.token ?? portal.token}`, pathname: '/', hash: options.hash ?? '' };
+
+  // A real History API, so the difference between navigating and normalising is
+  // observable. The shim previously had none, which meant every test exercised
+  // only the fallback and the Back button was never covered at all.
+  const history = {
+    pushes: 0,
+    replaces: 0,
+    pushed: [] as string[],
+    pushState(_state: unknown, _title: string, url: string) {
+      history.pushes += 1;
+      history.pushed.push(url.slice(url.indexOf('#')));
+      location.hash = url.slice(url.indexOf('#'));
+    },
+    replaceState(_state: unknown, _title: string, url: string) {
+      history.replaces += 1;
+      location.hash = url.slice(url.indexOf('#'));
+    },
+  };
 
   const errors: unknown[] = [];
   const onRejection = (error: unknown) => errors.push(error);
@@ -114,11 +150,14 @@ async function renderPage(options: { keepOpen?: boolean; token?: string } = {}):
           return registry.get(id);
         },
       },
-      location: { search: `?token=${options.token ?? portal.token}` },
+      location,
+      history,
       URLSearchParams,
       console,
       setTimeout,
       clearTimeout,
+      setInterval,
+      clearInterval,
       JSON,
       Promise,
       // The token is not forced in here: the page reads it from the URL, and a
@@ -135,9 +174,10 @@ async function renderPage(options: { keepOpen?: boolean; token?: string } = {}):
   } finally {
     process.off('unhandledRejection', onRejection);
     if (!options.keepOpen) await portal.close();
+    if (!options.keepOpen) db.close();
   }
 
-  return { node: (id) => registry.get(id) ?? element('div'), missing, errors, portal };
+  return { node: (id) => registry.get(id) ?? element('div'), missing, errors, portal, location, history };
 }
 
 describe('portal page', () => {
@@ -156,6 +196,21 @@ describe('portal page', () => {
 
     assert.notEqual(status, 'Saving...', 'the word must not be left on screen forever');
     assert.match(status, /not answering|roleeye ui/i, 'and it must say what to do about it');
+  });
+
+  it('blames the dead server, not the button that happened to ask last', async () => {
+    // Reported as "clicking Remove throws an error". The portal had stopped, so
+    // every panel was dead — but only the schedule panel said anything, which
+    // reads as that one button being broken.
+    const { node, portal } = await renderPage({ keepOpen: true });
+    await portal.close();
+
+    (node('scheduleRemove') as { onclick?: () => void }).onclick?.();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const banner = node('alert');
+    assert.match(String(banner.textContent), /not answering|roleeye ui/i, 'the page says it at the top');
+    assert.match(String(banner.className), /bad/);
   });
 
   it('explains a stale token instead of reporting a bare refusal', async () => {
@@ -206,5 +261,105 @@ describe('portal page', () => {
     assert.equal(node('passes').children.length, 2, 'depth is chosen, not typed');
     assert.ok(node('budget').children.length >= 3, 'the spending ceiling is chosen, not typed');
     assert.ok(node('catalog').children.length > 20, 'companies come preloaded');
+  });
+
+  it('offers a way to start a run from the page it is configured on', async () => {
+    // The portal used to describe a pipeline in detail and then tell the user
+    // to open a terminal and type three commands in the right order.
+    const { node } = await renderPage();
+
+    const stages = node('runStages').children.map((stage) =>
+      String((stage.children[1] as { textContent?: unknown } | undefined)?.textContent),
+    );
+    assert.deepEqual(stages, ['Fetch', 'Filter', 'Assess'], 'each step of the run is a switch the user can see');
+
+    assert.ok(node('runLimit').children.length >= 4, 'how many roles to assess is chosen, not typed');
+    assert.equal(node('runStart').disabled, false, 'and the button is live');
+  });
+
+  it('lets a kind of company be picked without naming one', async () => {
+    // Naming individual companies assumes the user already knows which boards
+    // exist, and invites "so where is Google?" — which the catalog cannot
+    // answer by listing harder.
+    const { node } = await renderPage();
+
+    assert.equal(node('facetSize').children.length, 3, 'size is a facet');
+    assert.equal(node('facetOwnership').children.length, 2, 'so is public versus private');
+    assert.ok(node('facetSector').children.length >= 8, 'and what they do');
+  });
+
+  it('counts coverage against what it can read, not against the world', async () => {
+    // "7 companies match" reads as a claim about every company there is. The
+    // number only means something beside its denominator.
+    const { node } = await renderPage();
+    const coverage = node('coverage').children.map((child) => String(child.textContent)).join(' ');
+
+    assert.match(coverage, /no companies selected yet/i, 'nothing is watched before anything is chosen');
+    assert.match(coverage, /nothing is watched until you do/i);
+  });
+
+  it('says why a large employer is missing rather than leaving it unexplained', async () => {
+    const { node } = await renderPage();
+    const text = String(node('whyMissingText').textContent);
+
+    assert.match(text, /Greenhouse|Lever|Ashby/, 'it names what it can read');
+    assert.match(text, /Microsoft|Google|Amazon/, 'and the obvious absences');
+    assert.match(text, /own applicant tracking/i, 'with the actual reason');
+  });
+
+  it('keeps individual companies out of the way until they are asked for', async () => {
+    // The catalog is now a fine-tuning tool, not the way to configure this.
+    const html = renderIndex();
+    const tuning = html.slice(html.indexOf('id="tuneCompanies"'));
+
+    assert.ok(tuning.indexOf('id="catalog"') > 0, 'the grid lives inside the disclosure');
+    assert.ok(
+      html.indexOf('id="tuneCompanies"') < html.indexOf('id="catalog"'),
+      'and the disclosure comes first, so the grid is collapsed by default',
+    );
+  });
+
+  it('gives each view its own address', async () => {
+    // Four sections behind one URL means no deep link, no back button, and a
+    // reload that always lands on setup.
+    const { node, location, history } = await renderPage();
+
+    assert.equal(location.hash, '#/setup', 'the opening view names itself');
+    assert.equal(history.pushes, 0, 'and normalising the first load is not navigation');
+
+    (node('nav-review') as { onclick?: () => void }).onclick?.();
+    assert.equal(location.hash, '#/review');
+
+    (node('nav-run') as { onclick?: () => void }).onclick?.();
+    assert.equal(location.hash, '#/run');
+  });
+
+  it('leaves a history entry per tab, so Back returns to the last view', async () => {
+    // Replacing on every click collapses the whole session into one entry, and
+    // Back then leaves the portal entirely rather than going to the view the
+    // user came from.
+    const { node, history } = await renderPage();
+
+    (node('nav-review') as { onclick?: () => void }).onclick?.();
+    (node('nav-pipeline') as { onclick?: () => void }).onclick?.();
+
+    assert.equal(history.pushes, 2, 'two navigations, two entries');
+    assert.deepEqual(history.pushed.slice(-2), ['#/review', '#/pipeline']);
+  });
+
+  it('opens the view the address asks for', async () => {
+    const { node, location } = await renderPage({ hash: '#/reports' });
+    const display = (id: string) => (node(id).style as { display?: string }).display;
+
+    assert.equal(location.hash, '#/reports');
+    assert.equal(display('viewReports'), '', 'the requested view is shown');
+    assert.equal(display('viewSetup'), 'none', 'and the default one is not');
+  });
+
+  it('falls back to setup when the address names a view that does not exist', async () => {
+    const { node, location } = await renderPage({ hash: '#/../etc/passwd' });
+
+    assert.equal((node('viewSetup').style as { display?: string }).display, '', 'an unknown view is not a blank page');
+    assert.equal(location.hash, '#/setup', 'and the address is corrected to match');
   });
 });

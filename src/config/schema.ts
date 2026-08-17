@@ -5,6 +5,85 @@ import { notifySchema } from './notify-schema.js';
 
 const weightSchema = z.number().int().min(0).max(100);
 
+/**
+ * How much a category matters, 0-5.
+ *
+ * The authored form of `weights`. Asking someone to distribute 100 points
+ * across seven categories is a puzzle, not a preference: "location: 100%" means
+ * nothing, and nobody sets compensation to zero, so the constraint mostly
+ * produces arithmetic. Importance is compiled into `weights`, which stays the
+ * only thing scoring reads — so nothing downstream has to know this exists.
+ */
+const importanceSchema = z.number().int().min(0).max(5);
+
+export const IMPORTANCE_LABELS = ['Ignore', 'Barely', 'Somewhat', 'Matters', 'Important', 'Critical'] as const;
+
+const IMPORTANCE_KEYS = [
+  'career_direction',
+  'hands_on',
+  'product_customer',
+  'ai_relevance',
+  'technical_domain',
+  'location',
+  'compensation',
+] as const;
+
+export type WeightKey = (typeof IMPORTANCE_KEYS)[number];
+
+/**
+ * Turns a 0-5 rating per category into integer weights totalling exactly 100.
+ *
+ * Largest-remainder, so the rounding error lands on the categories that care
+ * least about it rather than silently inflating one. A rating of every category
+ * at zero would leave nothing to score with, so it falls back to equal weight —
+ * the honest reading of "none of this matters" is "all of it matters the same".
+ */
+export function compileWeights(importance: Partial<Record<WeightKey, number>>): Record<WeightKey, number> {
+  const ratings = IMPORTANCE_KEYS.map((key) => Math.max(0, Math.min(5, Math.trunc(importance[key] ?? 3))));
+  const total = ratings.reduce((sum, rating) => sum + rating, 0);
+  const shares = total === 0 ? ratings.map(() => 1) : ratings;
+  const sum = shares.reduce((running, share) => running + share, 0);
+
+  const exact = shares.map((share) => (share / sum) * 100);
+  const floors = exact.map((value) => Math.floor(value));
+  let remaining = 100 - floors.reduce((running, value) => running + value, 0);
+
+  const order = exact
+    .map((value, index) => ({ index, remainder: value - Math.floor(value) }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+
+  const result = [...floors];
+  for (const entry of order) {
+    if (remaining <= 0) break;
+    result[entry.index] = (result[entry.index] ?? 0) + 1;
+    remaining -= 1;
+  }
+
+  return Object.fromEntries(IMPORTANCE_KEYS.map((key, index) => [key, result[index] ?? 0])) as Record<
+    WeightKey,
+    number
+  >;
+}
+
+/**
+ * Recovers a 0-5 rating from weights written before importance existed.
+ *
+ * Approximate by definition, and it does not need to be exact: it only has to
+ * put the sliders somewhere the user recognises as their own settings.
+ */
+export function inferImportance(weights: Partial<Record<WeightKey, number>>): Record<WeightKey, number> {
+  const values = IMPORTANCE_KEYS.map((key) => weights[key] ?? 0);
+  const highest = Math.max(...values, 1);
+
+  return Object.fromEntries(
+    IMPORTANCE_KEYS.map((key) => {
+      const weight = weights[key] ?? 0;
+      if (weight === 0) return [key, 0];
+      return [key, Math.max(1, Math.min(5, Math.round((weight / highest) * 5)))];
+    }),
+  ) as Record<WeightKey, number>;
+}
+
 export const criteriaSchema = z
   .object({
     version: z.number().int().positive().default(1),
@@ -37,6 +116,25 @@ export const criteriaSchema = z
         location: 10,
         compensation: 10,
       }),
+    /**
+     * What the user actually chose, before it was normalised into `weights`.
+     *
+     * Optional so every existing file keeps loading. When present it is the
+     * authored form and the portal shows it; `weights` remains what scoring
+     * reads, so the two must be written together or not at all.
+     */
+    importance: z
+      .object({
+        career_direction: importanceSchema,
+        hands_on: importanceSchema,
+        product_customer: importanceSchema,
+        ai_relevance: importanceSchema,
+        technical_domain: importanceSchema,
+        location: importanceSchema,
+        compensation: importanceSchema,
+      })
+      .strict()
+      .optional(),
     hard_filters: z
       .object({
         countries: z.array(z.string()).default([]),
@@ -199,8 +297,33 @@ export const sourcesSchema = z
       .object({
         capture_mode: captureModeSchema.default('scoped'),
         scope: scopeSchema,
+        /**
+         * Which companies to watch, as a rule rather than a list.
+         *
+         * A materialised list is a snapshot of the catalog on the day someone
+         * pressed save: a company added to the catalog later would never be
+         * watched, even though it matches exactly what they asked for. Storing
+         * the intent means coverage grows with the catalog, and the only names
+         * in this file are the ones the user deliberately singled out.
+         */
+        companies: z
+          .object({
+            size: z.array(z.enum(['startup', 'midsize', 'large'])).default([]),
+            ownership: z.array(z.enum(['private', 'public'])).default([]),
+            sectors: z.array(z.string()).default([]),
+            /** Watched whatever the rule says. Format: `type:token`. */
+            include: z.array(z.string()).default([]),
+            /** Never watched, even when the rule matches. Wins over include. */
+            exclude: z.array(z.string()).default([]),
+          })
+          .strict()
+          .default({ size: [], ownership: [], sectors: [], include: [], exclude: [] }),
       })
-      .default({ capture_mode: 'scoped', scope: {} }),
+      .default({
+        capture_mode: 'scoped',
+        scope: {},
+        companies: { size: [], ownership: [], sectors: [], include: [], exclude: [] },
+      }),
     /** Superseded by `discovery.scope.titles`; still honoured for existing configs. */
     discovery_filters: z
       .object({

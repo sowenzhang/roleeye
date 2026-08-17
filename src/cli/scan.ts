@@ -1,5 +1,6 @@
 import { ExitCode } from '../util/errors.js';
 import { runScan } from '../discovery/scan.js';
+import { withRunLock } from './with-lock.js';
 import { flagBool, flagList, flagString } from './args.js';
 import { printJson, printLine, type Command, type CommandContext } from './command.js';
 
@@ -19,6 +20,12 @@ export const scanCommand: Command = {
     const only = flagList(context.args, 'source') ?? (flagString(context.args, 'source') ? [flagString(context.args, 'source')!] : undefined);
     const dryRun = flagBool(context.args, 'dry-run');
 
+    // A dry run writes nothing, so it has no reason to wait for anything else.
+    if (dryRun) return execute();
+
+    return withRunLock(context, db, 'scan', execute);
+
+    async function execute() {
     const summary = await runScan({
       config,
       db,
@@ -67,5 +74,6 @@ export const scanCommand: Command = {
     if (summary.status === 'failed') return ExitCode.UnexpectedError;
     if (summary.status === 'warning') return ExitCode.CompletedWithWarnings;
     return ExitCode.Ok;
+    }
   },
 };

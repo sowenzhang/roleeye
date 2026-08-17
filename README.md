@@ -27,9 +27,10 @@ accounts for every token. It then tracks what you actually did about it, and
 answers questions about the record it kept. Drive it from a browser or a
 terminal — both call the same code.
 
-- `roleeye ui` — local portal: setup, review queue, applications, reports
+- `roleeye ui` — local portal: setup, run, review queue, applications, reports
 - `roleeye init --interactive` — the same setup as a terminal interview
 - `roleeye doctor` — validate config, database, migrations, adapters
+- `roleeye run` — the daily pass: scan, then screen, then evaluate
 - `roleeye scan` — fetch Greenhouse, Lever, Ashby, and career pages
 - `roleeye add <url>` — capture a single posting the sources do not reach
 - `roleeye scope test` — preview which roles the scope keeps and drops
@@ -145,9 +146,10 @@ npm run roleeye -- scan --dry-run
 
 | Command | Description |
 |---|---|
-| `roleeye ui` | Local portal: setup, review queue, applications, reports; `--port`, `--no-open` |
+| `roleeye ui` | Local portal: setup, run, review queue, applications, reports; `--port`, `--no-open` |
 | `roleeye init` | Set up config and the database; `--interactive` asks a few questions |
 | `roleeye doctor` | Validate config, paths, database, migrations, and adapters |
+| `roleeye run` | The daily pass: scan, screen, then evaluate; `--only <stage,...>`, `--limit`, `--force` |
 | `roleeye scan` | Fetch all enabled sources; `--source <name\|type>`, `--dry-run` |
 | `roleeye add <url>` | Capture one posting from a URL; `--company`, `--dry-run` |
 | `roleeye scope test` | Preview what the scope filter keeps and drops, with reasons |
