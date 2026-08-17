@@ -3,9 +3,10 @@ import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { z } from 'zod';
 import { ConfigError } from '../util/errors.js';
-import { criteriaSchema, sourcesSchema, syncSchema } from './schema.js';
+import { criteriaSchema, sourceSchema, sourcesSchema, syncSchema } from './schema.js';
 import { archetypesSchema, type ArchetypesConfig } from './archetype-schema.js';
 import type { CriteriaConfig, SourcesConfig, SyncConfig } from './schema.js';
+import { catalogEntryToSource, catalogKey, selectCatalog } from '../discovery/catalog.js';
 import { loadDotEnv, resolveEnvironment, type Environment } from './paths.js';
 
 export interface AppConfig {
@@ -109,7 +110,8 @@ export function loadConfig(options: LoadOptions): AppConfig {
   const missingFiles: string[] = [];
 
   const criteria = loadSection(env.paths.configDir, 'criteria.yaml', criteriaSchema, allowDefaults, loadedFiles, missingFiles);
-  const sources = loadSection(env.paths.configDir, 'sources.yaml', sourcesSchema, allowDefaults, loadedFiles, missingFiles);
+  const declared = loadSection(env.paths.configDir, 'sources.yaml', sourcesSchema, allowDefaults, loadedFiles, missingFiles);
+  const sources = { ...declared, sources: resolveSources(declared) };
   const sync = loadSection(env.paths.configDir, 'sync.yaml', syncSchema, true, loadedFiles, missingFiles);
 
   // Always defaulted: an empty archetype list is a valid state, and it is the
@@ -128,6 +130,44 @@ export function loadConfig(options: LoadOptions): AppConfig {
 
 export function enabledSources(config: AppConfig): SourcesConfig['sources'] {
   return config.sources.sources.filter((source) => source.enabled);
+}
+
+/**
+ * The boards a scan will actually read.
+ *
+ * `sources.yaml` holds two things: boards written down by name — a company
+ * added by URL, or one hand-edited in — and a rule describing the kind of
+ * company to watch. Everything downstream wants one list, and wants it to mean
+ * the same thing whether it came from a name or a rule, so they are combined
+ * here, once, at load.
+ *
+ * Resolving at load rather than at save is the point. A materialised list is a
+ * snapshot of the catalog on the day someone pressed save; a rule keeps
+ * matching as the catalog grows, which is what "watch companies like this"
+ * means to the person who asked for it.
+ */
+export function resolveSources(declared: SourcesConfig): SourcesConfig['sources'] {
+  const rule = declared.discovery.companies;
+  const written = declared.sources;
+
+  // A board named explicitly wins: it may carry per-source scope or capture
+  // overrides that a catalog entry knows nothing about.
+  const seen = new Set(
+    written.map((source) => catalogKey({ type: source.type, token: sourceToken(source) })),
+  );
+  const excluded = new Set(rule.exclude.map((key) => key.toLowerCase()));
+
+  const fromRule = selectCatalog(rule)
+    .filter((entry) => !seen.has(catalogKey(entry)))
+    .map((entry) => sourceSchema.parse(catalogEntryToSource(entry)));
+
+  return [...written.filter((source) => !excluded.has(catalogKey({ type: source.type, token: sourceToken(source) }))), ...fromRule];
+}
+
+function sourceToken(source: SourcesConfig['sources'][number]): string {
+  if ('board' in source) return source.board;
+  if ('site' in source) return source.site;
+  return source.url;
 }
 
 export type { CriteriaConfig, SourcesConfig, SyncConfig };

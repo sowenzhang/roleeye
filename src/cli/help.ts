@@ -11,6 +11,7 @@ import { digestCommand } from './digest.js';
 import { resumeCommand } from './resume.js';
 import { applyCommand } from './apply.js';
 import { scanCommand } from './scan.js';
+import { runCommand } from './run.js';
 import { scheduleCommand } from './schedule.js';
 import { scopeCommand } from './scope.js';
 import { screenCommand } from './screen.js';
@@ -24,6 +25,7 @@ export const commands: readonly Command[] = [
   initCommand,
   uiCommand,
   doctorCommand,
+  runCommand,
   scanCommand,
   addCommand,
   scopeCommand,
@@ -77,6 +79,7 @@ export function printHelp(context: CommandContext, commandName?: string): void {
   // now", which is the only question somebody running it for the first time has.
   printLine(context, 'Start here:');
   printLine(context, '  roleeye ui        pick companies and preferences in a browser');
+  printLine(context, '  roleeye run       the daily pass: scan, screen, then evaluate');
   printLine(context, '  roleeye scan      fetch what those companies have posted');
   printLine(context, '  roleeye screen    apply your rules and check for ghost jobs');
   printLine(context);

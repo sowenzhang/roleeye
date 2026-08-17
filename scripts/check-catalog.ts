@@ -7,7 +7,7 @@
  *
  *   npm run catalog:check
  */
-import { CATALOG } from '../src/portal/catalog.js';
+import { CATALOG } from '../src/discovery/catalog.js';
 import { boardUrl } from '../src/discovery/greenhouse.js';
 import { postingsUrl } from '../src/discovery/lever.js';
 import { jobBoardUrl } from '../src/discovery/ashby.js';

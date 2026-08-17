@@ -3,8 +3,8 @@ import type { Repositories } from '../db/repositories/index.js';
 import type { JobRecord } from '../db/repositories/jobs.js';
 import { Evaluator } from '../evaluate/evaluator.js';
 import { BudgetGuard } from '../evaluate/budget.js';
-import { largeRunWarning, rankForEvaluation, type RankedJob } from '../evaluate/priority.js';
-import { criteriaHash as criteriaHashOf } from '../evaluate/criteria.js';
+import { largeRunWarning } from '../evaluate/priority.js';
+import { rankEligible } from '../core/pipeline.js';
 import { createProvider, describeProvider, isLocalProvider } from '../reasoning/registry.js';
 import { truncate } from '../normalize/text.js';
 import { flagBool, flagNumber, flagString } from './args.js';
@@ -132,26 +132,6 @@ export const evaluateCommand: Command = {
     return ExitCode.Ok;
   },
 };
-
-/**
- * The roles most likely to repay an expensive call, best first.
- *
- * The cap exists so a daily run finishes. Ordering exists so the cap keeps the
- * best roles rather than whichever ones the database happened to return first.
- * One function produces the candidate set so the count the user is shown and
- * the list actually evaluated can never disagree.
- */
-function rankEligible(repos: Repositories, config: ReturnType<CommandContext['loadConfig']>): RankedJob[] {
-  const criteriaHash = criteriaHashOf(config.criteria);
-  const screeningFor = (jobId: string) => repos.screenings.findCurrent(jobId, criteriaHash);
-
-  const candidates = repos.jobs
-    .list({ inScope: true, limit: 500 })
-    // A role the screener rejected is not a candidate; an unscreened one still is.
-    .filter((job) => screeningFor(job.id)?.eligible !== false);
-
-  return rankForEvaluation(candidates, screeningFor);
-}
 
 /**
  * Measured: an agent CLI takes minutes per role, an API a few seconds.

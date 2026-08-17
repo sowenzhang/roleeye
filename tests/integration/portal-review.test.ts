@@ -515,6 +515,10 @@ describe('review portal page', () => {
       Number,
       Object,
       String,
+      // Hash routing reads and writes this. The shim carries no History API, so
+      // the script has to fall back to assigning the hash — which is exactly
+      // what it must do in any browser that refuses replaceState.
+      location: { pathname: '/', search: '', hash: '' },
       open: (url: string) => opened.push(url),
       // The shim has no `chip`; the review script shares it with the
       // configuration script in the real page.

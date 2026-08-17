@@ -1,8 +1,11 @@
 import { ExitCode } from '../util/errors.js';
 import { resolvePaths } from '../config/paths.js';
+import { loadConfig } from '../config/load.js';
 import { ConfigService } from '../portal/config-service.js';
 import { createRoutes } from '../portal/routes.js';
 import { createReviewRoutes } from '../portal/review-routes.js';
+import { createRunRoutes } from '../portal/run-routes.js';
+import { RunService } from '../portal/run-service.js';
 import { renderIndex } from '../portal/index-page.js';
 import { startPortal } from '../portal/server.js';
 import { syncSearchIndex } from '../search/indexer.js';
@@ -25,6 +28,22 @@ export const uiCommand: Command = {
   async run(context: CommandContext) {
     const paths = resolvePaths(context.root);
     const config = new ConfigService(paths);
+
+    /**
+     * Read fresh and strictly for every run.
+     *
+     * The context's loader caches, and the portal exists to change these files:
+     * a cached copy would mean the settings someone just saved took effect only
+     * after a restart. Strict, because a run using silent defaults would scan
+     * the wrong sources under the wrong scope and look like it had worked.
+     */
+    const strictConfig = () => loadConfig({ root: paths.root });
+
+    const runs = new RunService({
+      logger: context.logger,
+      loadConfig: strictConfig,
+      openDb: () => context.openDb(),
+    });
 
     // The search index is refreshed once, here, rather than by the route that
     // reads it. A refresh is a write transaction over the whole corpus, and a
@@ -50,6 +69,14 @@ export const uiCommand: Command = {
           logger: context.logger,
           openDb: () => context.openDb(),
         }),
+        ...createRunRoutes({
+          logger: context.logger,
+          runs,
+          config,
+          loadConfig: strictConfig,
+          openDb: () => context.openDb(),
+          root: paths.root,
+        }),
       },
     });
 
@@ -66,7 +93,15 @@ export const uiCommand: Command = {
 
     await new Promise<void>((resolve) => {
       const stop = (): void => {
-        void portal.close().then(resolve);
+        // A run in flight is asked to stop and then waited for. Killing the
+        // process mid-scan would leave a source run open forever, and mid-
+        // assessment would discard a model call the user has already paid for.
+        if (runs.isRunning) printLine(context, 'Stopping the run in progress...');
+        runs.cancel();
+        void runs
+          .settle()
+          .then(() => portal.close())
+          .then(resolve);
       };
       process.once('SIGINT', stop);
       process.once('SIGTERM', stop);

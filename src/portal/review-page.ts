@@ -145,11 +145,29 @@ const review = { view: 'setup', queue: [], pipeline: null, reports: null, dimens
 
 const VIEWS = [
   ['setup', 'Setup', 'viewSetup'],
+  ['run', 'Run', 'viewRun'],
   ['review', 'Review', 'viewReview'],
   ['pipeline', 'Applications', 'viewPipeline'],
   ['reports', 'Reports', 'viewReports'],
 ];
 
+const DEFAULT_VIEW = 'setup';
+
+/** The view named in the address bar, or the default when it names nothing real. */
+function viewFromHash() {
+  const raw = (location.hash || '').replace(/^#\/?/, '');
+  return VIEWS.some((entry) => entry[0] === raw) ? raw : DEFAULT_VIEW;
+}
+
+/**
+ * Switches views and says so in the address bar.
+ *
+ * This page swaps five sections behind one URL, so without a hash there is no
+ * way to link to the review queue, reloading always lands back on setup, and
+ * the back button leaves the application entirely. The hash is written rather
+ * than pushed through the history API because the portal is served from a
+ * token-bearing URL: a pushed path would drop the token on reload.
+ */
 function showView(name) {
   review.view = name;
   for (const [id, , element] of VIEWS) {
@@ -160,6 +178,22 @@ function showView(name) {
     const button = $('nav-' + id);
     if (button && button.setAttribute) button.setAttribute('aria-pressed', String(id === name));
   }
+
+  // Always normalised, including on the first load and when the address names
+  // something that is not a view: an address bar that disagrees with the page
+  // is worse than one that says nothing.
+  const target = '#/' + name;
+  if (location.hash !== target) {
+    // Replaces rather than pushes: a run of clicks through the tabs should not
+    // require the same number of back presses to leave the page.
+    if (typeof history !== 'undefined' && history && typeof history.replaceState === 'function') {
+      history.replaceState(null, '', (location.pathname || '') + (location.search || '') + target);
+    } else {
+      location.hash = target;
+    }
+  }
+
+  if (name === 'run') loadRun();
   if (name === 'review') loadQueue();
   if (name === 'pipeline') loadPipeline();
   if (name === 'reports') loadReports();
@@ -224,7 +258,7 @@ async function loadQueue() {
   $('queueCount').textContent = review.queue.length + ' role(s) awaiting your call';
 
   if (review.queue.length === 0) {
-    host.append(line('Nothing evaluated yet. Run roleeye scan, then roleeye screen, then roleeye evaluate.', 'empty'));
+    host.append(line('Nothing evaluated yet. Open Run and press Run now — it fetches, filters, then assesses.', 'empty'));
     return;
   }
 
@@ -608,6 +642,7 @@ async function loadReports() {
 }
 
 $('nav-setup').onclick = () => showView('setup');
+$('nav-run').onclick = () => showView('run');
 $('nav-review').onclick = () => showView('review');
 $('nav-pipeline').onclick = () => showView('pipeline');
 $('nav-reports').onclick = () => showView('reports');
@@ -615,5 +650,10 @@ $('queueRefresh').onclick = loadQueue;
 $('pipelineRefresh').onclick = loadPipeline;
 $('historyGo').onclick = loadHistory;
 $('noteAdd').onclick = addNote;
-showView('setup');
+
+if (typeof addEventListener === 'function') {
+  addEventListener('hashchange', () => showView(viewFromHash()));
+}
+
+showView(viewFromHash());
 `;

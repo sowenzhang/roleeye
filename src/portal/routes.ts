@@ -1,4 +1,4 @@
-import type { AppConfig } from '../config/load.js';
+import { resolveSources, type AppConfig } from '../config/load.js';
 import type { Repositories } from '../db/repositories/index.js';
 import { sourcesSchema, type SourceConfig } from '../config/schema.js';
 import { evaluateScope, scopeFromConfig } from '../discovery/scope.js';
@@ -7,7 +7,15 @@ import { postingsUrl } from '../discovery/lever.js';
 import { jobBoardUrl } from '../discovery/ashby.js';
 import { createHttpClient } from '../discovery/http.js';
 import { parseBoardEntry } from '../cli/setup.js';
-import { CATALOG, CATEGORY_LABELS, catalogEntryToSource } from './catalog.js';
+import {
+  CATALOG,
+  CATEGORY_LABELS,
+  catalogEntryToSource,
+  catalogKey,
+  OWNERSHIP_LABELS,
+  selectCatalog,
+  SIZE_LABELS,
+} from '../discovery/catalog.js';
 import { estimateCost, MODEL_OPTIONS, type ModelOption } from './models.js';
 import {
   APPLICATION_SYSTEMS,
@@ -44,6 +52,85 @@ function ok(json: unknown): RouteResult {
 
 function badRequest(json: unknown): RouteResult {
   return { status: 400, json };
+}
+
+const EMPTY_RULE = { size: [], ownership: [], sectors: [], include: [], exclude: [] } as const;
+
+/**
+ * Merges one level into each scope group instead of replacing it.
+ *
+ * The page owns titles, levels and locations. It has never heard of
+ * `departments`, `teams`, `titles.patterns` or `locations.exclude`, and a
+ * wholesale replacement quietly deleted every one of them the first time
+ * somebody pressed Save after hand-editing the file.
+ */
+function mergeScope(existing: unknown, compiled: Record<string, unknown>): Record<string, unknown> {
+  const current = (existing ?? {}) as Record<string, unknown>;
+  const merged: Record<string, unknown> = { ...current };
+
+  for (const [group, value] of Object.entries(compiled)) {
+    const previous = current[group];
+    merged[group] =
+      isPlainObject(previous) && isPlainObject(value) ? { ...previous, ...value } : value;
+  }
+
+  return merged;
+}
+
+/** Same rule, for the preference groups the setup page actually asks about. */
+function mergePreferences(existing: unknown, compiled: Record<string, unknown>): Record<string, unknown> {
+  return mergeScope(existing, compiled);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sourceKey(source: SourceConfig): string {
+  const token = 'board' in source ? source.board : 'site' in source ? source.site : source.url;
+  return `${source.type}:${token}`.toLowerCase();
+}
+
+/**
+ * Whether this entry is exactly what the catalog would have produced.
+ *
+ * The rule can only express "watch this board with its defaults". A source the
+ * user disabled, renamed, relabelled, or scoped carries information a rule
+ * cannot hold, so converting it would silently re-enable it or lose its name —
+ * and a source name is what `--only` selects and what run history is filed
+ * under.
+ */
+function isCanonicalCatalogSource(source: SourceConfig): boolean {
+  const entry = CATALOG.find((candidate) => catalogKey(candidate) === sourceKey(source));
+  if (!entry) return false;
+
+  const canonical = catalogEntryToSource(entry) as Record<string, unknown>;
+  const actual = source as unknown as Record<string, unknown>;
+
+  // Compared field by field so a key added to either shape later cannot make
+  // this quietly start or stop matching.
+  return (
+    actual['name'] === canonical['name'] &&
+    actual['company'] === canonical['company'] &&
+    actual['enabled'] === true &&
+    actual['scope'] === undefined &&
+    actual['capture_mode'] === undefined
+  );
+}
+
+/** Bounded, de-duplicated strings: these become selectors, not free text. */
+function stringList(value: unknown, max = 200): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const clean = entry.trim().slice(0, 120);
+    if (clean.length > 0) seen.add(clean);
+    if (seen.size >= max) break;
+  }
+
+  return [...seen];
 }
 
 /**
@@ -158,6 +245,23 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
     'GET /api/config': () => {
       const criteria = deps.config.readCriteria();
       const sources = deps.config.readSources();
+      const rule = sources.value.discovery?.companies ?? EMPTY_RULE;
+
+      // A config written before rules existed names its boards outright. Only
+      // an entry identical to what the catalog would generate can become a
+      // rule `include`: anything the user has touched — renamed, disabled,
+      // relabelled, or given its own scope — has to stay a named board, or
+      // saving would quietly hand it back its defaults.
+      const plain: string[] = [];
+      const custom: SourceConfig[] = [];
+
+      for (const source of sources.value.sources) {
+        if (isCanonicalCatalogSource(source)) plain.push(sourceKey(source));
+        else custom.push(source);
+      }
+
+      const include = [...new Set([...rule.include.map((key) => key.toLowerCase()), ...plain])];
+      const effective = { ...rule, include };
 
       return ok({
         criteria: criteria.value,
@@ -166,6 +270,14 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
           (sources.value.discovery?.scope ?? {}) as Record<string, unknown>,
           criteria.value as unknown as Record<string, unknown>,
         ),
+        companies: {
+          ...effective,
+          // What the rule resolves to, so the page never re-implements this.
+          matched: selectCatalog(effective).map(catalogKey),
+          // Returned whole and written back whole, so a save can never drop a
+          // setting the page was not shown.
+          custom,
+        },
         captureMode: sources.value.discovery?.capture_mode ?? 'scoped',
         exists: { criteria: criteria.exists, sources: sources.exists },
         invalid: [
@@ -178,18 +290,22 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
 
     'GET /api/catalog': () => {
       const sources = deps.config.readSources();
-      const existing = new Set(
-        sources.value.sources.map((source: SourceConfig) => {
-          const token = 'board' in source ? source.board : 'site' in source ? source.site : '';
-          return `${source.type}:${token}`.toLowerCase();
-        }),
-      );
+      const rule = sources.value.discovery?.companies ?? EMPTY_RULE;
+      const matched = new Set(selectCatalog(rule).map(catalogKey));
 
       return ok({
         categories: CATEGORY_LABELS,
+        sizes: SIZE_LABELS,
+        ownership: OWNERSHIP_LABELS,
+        /** What the catalog can and cannot reach, so the page can explain gaps. */
+        coverage: {
+          total: CATALOG.length,
+          providers: ['Greenhouse', 'Lever', 'Ashby'],
+        },
         entries: CATALOG.map((entry) => ({
           ...entry,
-          added: existing.has(`${entry.type}:${entry.token}`.toLowerCase()),
+          key: catalogKey(entry),
+          added: matched.has(catalogKey(entry)),
         })),
       });
     },
@@ -216,19 +332,31 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
       const criteria = deps.config.readCriteria().value as Record<string, any>;
 
       sources['discovery'] = {
+        ...sources['discovery'],
         capture_mode: selection.captureMode ?? 'scoped',
-        scope: compiled.scope,
+        // Merged one level down, not replaced. The page owns titles, levels and
+        // locations; it knows nothing about departments, teams, or per-source
+        // caps, and replacing the whole object deleted them on every save.
+        scope: mergeScope(sources['discovery']?.scope, compiled.scope),
+        companies: {
+          size: stringList(selection.companySize),
+          ownership: stringList(selection.companyOwnership),
+          sectors: stringList(selection.companySectors),
+          include: stringList(selection.companyInclude),
+          exclude: stringList(selection.companyExclude),
+        },
       };
-      if (Array.isArray(selection.catalog)) {
-        const chosen = CATALOG.filter((entry) =>
-          (selection.catalog as string[]).includes(`${entry.type}:${entry.token}`),
-        );
-        sources['sources'] = chosen.map(catalogEntryToSource);
-      }
 
       criteria['hard_filters'] = { ...criteria['hard_filters'], ...compiled.hardFilters };
-      criteria['preferences'] = { ...criteria['preferences'], ...compiled.preferences };
+      criteria['preferences'] = mergePreferences(criteria['preferences'], compiled.preferences);
       criteria['screening'] = { ...criteria['screening'], enabled: selection.screeningEnabled !== false };
+
+      if (Array.isArray(selection.customBoards)) {
+        // Written back exactly as they were read. These entries may carry
+        // per-source scope or capture overrides that no rule can express, so
+        // the portal passes them through rather than rebuilding them.
+        sources['sources'] = selection.customBoards;
+      }
 
       const savedSources = deps.config.saveSources(sources);
       if (!savedSources.ok) return badRequest({ saved: false, problems: savedSources.problems });
@@ -303,7 +431,10 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
 
     'GET /api/status': () => {
       const sources = deps.config.readSources();
-      const enabled = sources.value.sources.filter((source: SourceConfig) => source.enabled);
+      // Counted from what a scan would actually read, not from the names in the
+      // file: with a rule, that file may list nothing at all.
+      const resolved = resolveSources(sources.value);
+      const enabled = resolved.filter((source) => source.enabled);
 
       try {
         const { repos } = deps.openDb();
@@ -313,7 +444,7 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
 
         return ok({
           configured: sources.exists,
-          sources: { total: sources.value.sources.length, enabled: enabled.length },
+          sources: { total: resolved.length, enabled: enabled.length },
           jobs,
           postings,
           companies,
@@ -321,7 +452,7 @@ export function createRoutes(deps: RouteDependencies): Record<string, RouteHandl
       } catch {
         return ok({
           configured: sources.exists,
-          sources: { total: sources.value.sources.length, enabled: enabled.length },
+          sources: { total: resolved.length, enabled: enabled.length },
           jobs: 0,
           postings: 0,
           companies: 0,

@@ -15,6 +15,7 @@
  * long enough already.
  */
 import { REVIEW_MARKUP, REVIEW_SCRIPT, REVIEW_STYLES } from './review-page.js';
+import { RUN_MARKUP, RUN_SCRIPT, RUN_STYLES } from './run-page.js';
 
 const STYLES = String.raw`
 :root {
@@ -136,6 +137,12 @@ input::placeholder { color: var(--faint); }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
 
 .catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; max-height: 330px; overflow: auto; padding-right: 4px; }
+.coverage {
+  margin-top: 22px; padding: 14px 16px; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--surface); display: grid; gap: 3px;
+}
+.coverage b { font-size: 14px; font-weight: 550; }
+.coverage span { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
 .co {
   display: flex; align-items: center; gap: 10px; text-align: left; width: 100%;
   border: 1px solid var(--line); background: var(--surface); color: var(--text);
@@ -210,6 +217,8 @@ button.ghost {
 }
 button.ghost:hover { border-color: var(--faint); }
 button.ghost:active { transform: scale(0.98); }
+button.ghost:disabled { opacity: 0.4; cursor: default; transform: none; border-color: var(--line); }
+button.ghost:disabled:hover { border-color: var(--line); }
 
 .status { font-size: 12.5px; color: var(--muted); min-height: 18px; margin-top: 10px; }
 .status.ok { color: var(--accent); }
@@ -279,6 +288,10 @@ async function api(path, options = {}) {
       headers: { 'content-type': 'application/json', 'x-roleeye-token': token, ...(options.headers || {}) },
     });
   } catch (error) {
+    // The whole page is dead, not the one panel that happened to ask last.
+    // Without saying so at the top, the user reads "not answering" inside the
+    // schedule panel and concludes the Remove button is broken.
+    raiseOffline(timedOut ? TIMED_OUT : UNREACHABLE);
     return { ok: false, reachable: false, payload: { reason: timedOut ? TIMED_OUT : UNREACHABLE } };
   } finally {
     if (timer !== undefined && typeof clearTimeout === 'function') clearTimeout(timer);
@@ -289,10 +302,27 @@ async function api(path, options = {}) {
   // A restarted portal mints a new token, so an old tab is refused. That is
   // correct, and "403" is not an explanation anybody can act on.
   if (response.status === 403) {
+    raiseOffline(STALE_TOKEN);
     return { ok: false, reachable: true, payload: { ...payload, reason: STALE_TOKEN } };
   }
 
   return { ok: response.ok, reachable: true, payload };
+}
+
+let offlineAnnounced = false;
+
+/**
+ * Says once, at the top of the page, that nothing here works any more.
+ *
+ * Once: a dead server fails every poll and every panel, and repainting the
+ * banner on each one would fight with whatever else it is showing. It is never
+ * cleared, because the fix is to open the link the restarted portal printed,
+ * and this tab cannot do that for the user.
+ */
+function raiseOffline(reason) {
+  if (offlineAnnounced) return;
+  offlineAnnounced = true;
+  if (typeof announce === 'function') announce(reason, 'bad');
 }
 
 /** The reason a request failed, in words, whatever the failure was. */
@@ -334,9 +364,16 @@ const state = {
   selection: {
     families: [], seniority: [], locations: [], metros: [], remoteOnly: false,
     postedWithinDays: 60, salaryFloor: 0, refuseSystems: [], rejectRelocation: true,
-    screeningEnabled: true, captureMode: 'scoped', catalog: [], extraTitles: [], extraExcludes: [],
+    screeningEnabled: true, captureMode: 'scoped', extraTitles: [], extraExcludes: [],
   },
+  /** The company rule. Named companies appear only in include and exclude. */
+  companies: { size: [], ownership: [], sectors: [], include: [], exclude: [] },
+  /** Boards added by URL, which no rule can describe. */
+  customBoards: [],
+  coverage: {},
   filter: '',
+  sizes: {},
+  ownership: {},
   engines: [],
   reasoning: { provider: 'none', model: '', passes: 2 },
   monthlyBudget: 20,
@@ -598,15 +635,159 @@ async function detect() {
   note.textContent = 'Found ' + payload.models.length + ' local model(s).';
 }
 
-function renderCatalog() {
-  const host = $('catalog');
+/**
+ * Which catalog entries the rule selects, mirroring the server's resolver.
+ *
+ * Facets within a row are OR and rows are AND. An explicit include always wins
+ * over the facets; an explicit exclude wins over everything, because that is
+ * the user overruling their own rule.
+ */
+function ruledCompanies() {
+  const rule = state.companies;
+  const hasFacets = rule.size.length + rule.ownership.length + rule.sectors.length > 0;
+
+  return state.catalog.filter((entry) => {
+    if (rule.exclude.indexOf(entry.key) >= 0) return false;
+    if (rule.include.indexOf(entry.key) >= 0) return true;
+    if (!hasFacets) return false;
+    if (rule.size.length > 0 && rule.size.indexOf(entry.size) < 0) return false;
+    if (rule.ownership.length > 0 && rule.ownership.indexOf(entry.ownership) < 0) return false;
+    if (rule.sectors.length > 0 && rule.sectors.indexOf(entry.category) < 0) return false;
+    return true;
+  });
+}
+
+/** The catalog rows the fine-tuning panel shows, filtered by its own search. */
+function catalogMatches() {
   const term = state.filter.trim().toLowerCase();
-  const matches = state.catalog.filter(
+  if (!term) return state.catalog;
+
+  return state.catalog.filter(
     (entry) =>
-      !term ||
       entry.company.toLowerCase().includes(term) ||
       (state.categories[entry.category] || '').toLowerCase().includes(term),
   );
+}
+
+function renderFacets() {
+  const sizes = $('facetSize');
+  sizes.replaceChildren();
+  Object.keys(state.sizes).forEach((key) => {
+    const info = state.sizes[key];
+    sizes.append(
+      chip(info.label, info.detail, state.companies.size.indexOf(key) >= 0, () => toggle(state.companies.size, key)),
+    );
+  });
+
+  const owners = $('facetOwnership');
+  owners.replaceChildren();
+  Object.keys(state.ownership).forEach((key) => {
+    const info = state.ownership[key];
+    owners.append(
+      chip(info.label, info.detail, state.companies.ownership.indexOf(key) >= 0, () =>
+        toggle(state.companies.ownership, key),
+      ),
+    );
+  });
+
+  const sectors = $('facetSector');
+  sectors.replaceChildren();
+  // Only sectors the catalog actually has, so no chip ever matches nothing.
+  const present = [];
+  state.catalog.forEach((entry) => {
+    if (present.indexOf(entry.category) < 0) present.push(entry.category);
+  });
+  present.forEach((key) => {
+    sectors.append(
+      chip(state.categories[key] || key, undefined, state.companies.sectors.indexOf(key) >= 0, () =>
+        toggle(state.companies.sectors, key),
+      ),
+    );
+  });
+}
+
+/**
+ * How many boards this rule reaches, and what it cannot reach at all.
+ *
+ * The count needs its denominator. "7 companies match" reads as a claim about
+ * the world, and invites the entirely reasonable question of where Microsoft
+ * and Google are. The honest number is a share of the boards RoleEye can read.
+ */
+function renderCoverage() {
+  const host = $('coverage');
+  host.replaceChildren();
+
+  const matched = ruledCompanies();
+  const custom = state.customBoards.length;
+  const total = state.catalog.length;
+
+  const headline = document.createElement('b');
+  headline.textContent =
+    matched.length === 0 && custom === 0
+      ? 'No companies selected yet'
+      : 'Watching ' + matched.length + ' of ' + total + ' boards RoleEye can read' +
+        (custom > 0 ? ', plus ' + custom + ' you added' : '');
+  host.append(headline);
+
+  const detail = document.createElement('span');
+  detail.textContent =
+    matched.length === 0 && custom === 0
+      ? 'Pick a size, an ownership, or a sector above. Nothing is watched until you do.'
+      : 'New companies matching this are picked up automatically. Sizes are approximate.';
+  host.append(detail);
+
+  const overrides = state.companies.include.length + state.companies.exclude.length;
+  if (overrides > 0) {
+    const note = document.createElement('span');
+    note.textContent =
+      state.companies.include.length + ' added by hand, ' + state.companies.exclude.length + ' removed by hand.';
+    host.append(note);
+  }
+}
+
+function renderWhyMissing() {
+  const list = state.coverage.providers || ['Greenhouse', 'Lever', 'Ashby'];
+  const providers = list.length > 1 ? list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1] : list[0];
+
+  $('whyMissingText').textContent =
+    'RoleEye reads ' + providers + ' boards, which is what most startups and scale-ups use. ' +
+    'Large employers such as Microsoft, Google, Amazon and Meta run their own applicant tracking systems ' +
+    'and publish no machine-readable board, so no tool can watch them this way. ' +
+    'Paste any careers URL below and RoleEye will tell you whether it can read it.';
+}
+
+/** How a source entry is named, matching the key the catalog and config use. */
+function boardKey(board) {
+  const token = board.board !== undefined ? board.board : board.site !== undefined ? board.site : board.url;
+  return (board.type + ':' + token).toLowerCase();
+}
+
+function renderCustomBoards() {
+  const host = $('customBoards');
+  host.replaceChildren();
+  if (state.customBoards.length === 0) return;
+
+  state.customBoards.forEach((board, index) => {
+    const row = document.createElement('div');
+    row.className = 'kv';
+
+    const name = document.createElement('span');
+    name.textContent = board.company + '  (' + board.type + ')';
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'ghost';
+    remove.textContent = 'Remove';
+    remove.onclick = () => { state.customBoards.splice(index, 1); render(); };
+
+    row.append(name, remove);
+    host.append(row);
+  });
+}
+
+function renderCatalog() {
+  const host = $('catalog');
+  const matches = catalogMatches();
 
   host.replaceChildren();
 
@@ -626,14 +807,16 @@ function renderCatalog() {
   if (!matches.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = 'No companies match "' + state.filter + '". Add any board by URL below.';
+    empty.textContent = 'No board here matches "' + state.filter + '". Add one by URL below.';
     host.append(empty);
     return;
   }
 
+  const watched = {};
+  ruledCompanies().forEach((entry) => { watched[entry.key] = true; });
+
   for (const entry of matches) {
-    const key = entry.type + ':' + entry.token;
-    const picked = state.selection.catalog.includes(key);
+    const picked = watched[entry.key] === true;
 
     const button = document.createElement('button');
     button.type = 'button';
@@ -649,11 +832,27 @@ function renderCatalog() {
     const name = document.createElement('b');
     name.textContent = entry.company;
     const cat = document.createElement('span');
-    cat.textContent = state.categories[entry.category] || entry.category;
+    const size = (state.sizes[entry.size] || {}).label;
+    cat.textContent = [size, state.categories[entry.category] || entry.category].filter(Boolean).join(' · ');
     who.append(name, cat);
 
     button.append(mark, who);
-    button.onclick = () => { toggle(state.selection.catalog, key); render(); };
+    // Overriding means recording the disagreement with the rule, not editing a
+    // list: the rule has to keep working for every company it was never asked
+    // about.
+    button.onclick = () => {
+      const rule = state.companies;
+      if (picked) {
+        const at = rule.include.indexOf(entry.key);
+        if (at >= 0) rule.include.splice(at, 1);
+        if (rule.exclude.indexOf(entry.key) < 0) rule.exclude.push(entry.key);
+      } else {
+        const at = rule.exclude.indexOf(entry.key);
+        if (at >= 0) rule.exclude.splice(at, 1);
+        if (rule.include.indexOf(entry.key) < 0) rule.include.push(entry.key);
+      }
+      render();
+    };
     host.append(button);
   }
 }
@@ -661,7 +860,7 @@ function renderCatalog() {
 function renderSummary() {
   const roles = state.presets.families.filter((f) => state.selection.families.includes(f.id)).map((f) => f.label);
   const rows = [
-    ['Companies', state.selection.catalog.length || 'none picked'],
+    ['Companies', ruledCompanies().length + state.customBoards.length || 'none selected'],
     ['Role families', roles.length ? roles.length : 'any'],
     ['Seniority', state.selection.seniority.length ? state.selection.seniority.length + ' levels' : 'any'],
     ['Locations', state.selection.locations.length ? state.selection.locations.length : 'any'],
@@ -690,6 +889,9 @@ function render() {
   renderSalary();
   renderSystems();
   renderRecency();
+  renderFacets();
+  renderCoverage();
+  renderCustomBoards();
   renderCatalog();
   renderEngines();
   renderPasses();
@@ -710,6 +912,12 @@ async function save() {
   state.selection.extraTitles = $('extraTitles').value.split(',').map((s) => s.trim()).filter(Boolean);
   state.selection.extraExcludes = $('extraExcludes').value.split(',').map((s) => s.trim()).filter(Boolean);
   state.selection.captureMode = $('captureMode').value;
+  state.selection.companySize = state.companies.size;
+  state.selection.companyOwnership = state.companies.ownership;
+  state.selection.companySectors = state.companies.sectors;
+  state.selection.companyInclude = state.companies.include;
+  state.selection.companyExclude = state.companies.exclude;
+  state.selection.customBoards = state.customBoards;
 
   const preferences = await api('/api/preferences', { method: 'PUT', body: JSON.stringify(state.selection) });
   const payload = preferences.payload;
@@ -736,7 +944,7 @@ async function save() {
 
   if (preferences.ok && engine.ok) {
     status.className = 'status ok';
-    status.textContent = 'Saved. Run roleeye scan, or wait for the scheduled run.';
+    status.textContent = 'Saved. Open Run to start it now, or schedule it there.';
     loadStatus();
   } else {
     status.className = 'status bad';
@@ -760,12 +968,21 @@ async function addByUrl() {
     return;
   }
 
-  const key = payload.type + ':' + payload.token;
-  if (!state.catalog.some((e) => e.type + ':' + e.token === key)) {
-    state.catalog.unshift({ company: payload.token, type: payload.type, token: payload.token, category: 'custom' });
-    state.categories.custom = 'Added by you';
+  const key = (payload.type + ':' + payload.token).toLowerCase();
+  const known = state.catalog.some((e) => e.key === key);
+
+  if (known) {
+    // Already in the catalog, so this is an override rather than a new board.
+    const at = state.companies.exclude.indexOf(key);
+    if (at >= 0) state.companies.exclude.splice(at, 1);
+    if (state.companies.include.indexOf(key) < 0) state.companies.include.push(key);
+  } else if (!state.customBoards.some((board) => boardKey(board) === key)) {
+    const name = (payload.token + '-' + payload.type).toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+    const board = { name: name, type: payload.type, enabled: true, company: payload.token };
+    if (payload.type === 'lever') board.site = payload.token;
+    else board.board = payload.token;
+    state.customBoards.push(board);
   }
-  if (!state.selection.catalog.includes(key)) state.selection.catalog.push(key);
 
   status.className = 'status ok';
   status.textContent = 'Added ' + payload.token + ' - ' + payload.openRoles + ' roles open right now.';
@@ -795,7 +1012,7 @@ async function preview() {
   if (!payload.evaluated) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = 'Nothing stored yet. Save, then run roleeye scan to see what these settings keep.';
+    empty.textContent = 'Nothing stored yet. Save, then open Run to fetch these companies and see what these settings keep.';
     host.append(empty);
     return;
   }
@@ -871,6 +1088,9 @@ async function load() {
   state.presets = presets.payload;
   state.catalog = catalog.payload.entries || [];
   state.categories = catalog.payload.categories || {};
+  state.sizes = catalog.payload.sizes || {};
+  state.ownership = catalog.payload.ownership || {};
+  state.coverage = catalog.payload.coverage || {};
   state.engines = reasoning.payload.models || [];
   Object.assign(state.reasoning, reasoning.payload.current || {});
   if (typeof (reasoning.payload.budget || {}).max_cost_per_month_usd === 'number') {
@@ -881,7 +1101,16 @@ async function load() {
   }
   Object.assign(state.selection, config.payload.selection || {});
   state.selection.captureMode = config.payload.captureMode || 'scoped';
-  state.selection.catalog = state.catalog.filter((e) => e.added).map((e) => e.type + ':' + e.token);
+
+  const companies = config.payload.companies || {};
+  state.companies = {
+    size: companies.size || [],
+    ownership: companies.ownership || [],
+    sectors: companies.sectors || [],
+    include: companies.include || [],
+    exclude: companies.exclude || [],
+  };
+  state.customBoards = (companies.custom || []).slice();
 
   $('captureMode').value = state.selection.captureMode;
   $('extraTitles').value = (state.selection.extraTitles || []).join(', ');
@@ -889,6 +1118,7 @@ async function load() {
   $('paths').textContent = config.payload.locations.criteria;
   showInvalid(config.payload.invalid || []);
 
+  renderWhyMissing();
   render();
   loadStatus();
 }
@@ -922,7 +1152,7 @@ export function renderIndex(): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RoleEye</title>
-<style>${STYLES}${REVIEW_STYLES}</style>
+<style>${STYLES}${REVIEW_STYLES}${RUN_STYLES}</style>
 </head>
 <body>
 <header>
@@ -930,6 +1160,7 @@ export function renderIndex(): string {
   <span class="tagline">everything stays on this machine</span>
   <nav class="views">
     <button id="nav-setup" type="button" aria-pressed="true">Setup</button>
+    <button id="nav-run" type="button" aria-pressed="false">Run</button>
     <button id="nav-review" type="button" aria-pressed="false">Review</button>
     <button id="nav-pipeline" type="button" aria-pressed="false">Applications</button>
     <button id="nav-reports" type="button" aria-pressed="false">Reports</button>
@@ -942,18 +1173,39 @@ export function renderIndex(): string {
   <main>
     <section style="--i:0">
       <h2>Companies to watch</h2>
-      <p class="hint">Pick from boards already verified as reachable, or add any other by URL.</p>
-      <div class="search">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3" stroke-linecap="round"/></svg>
-        <input type="text" id="search" placeholder="Search companies, or a category like fintech">
-      </div>
-      <div class="catalog" id="catalog"></div>
-      <details class="adv">
-        <summary>Add a company that is not listed</summary>
+      <p class="hint">Describe the kind of company. RoleEye watches every board it can read that matches, and keeps matching as more are added — you never have to maintain a list.</p>
+
+      <div class="label">Size</div>
+      <div class="chips" id="facetSize"></div>
+
+      <div class="label">Ownership</div>
+      <div class="chips" id="facetOwnership"></div>
+
+      <div class="label">What they do</div>
+      <div class="chips" id="facetSector"></div>
+
+      <div class="coverage" id="coverage"></div>
+
+      <details class="adv" id="tuneCompanies">
+        <summary>Add or remove specific companies</summary>
         <div class="body">
-          <input type="text" id="boardEntry" placeholder="https://boards.greenhouse.io/yourcompany">
+          <p class="hint" style="margin:0">Anything you change here overrides the rule above. Removing a company keeps it out even when it matches.</p>
+          <div class="search">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3" stroke-linecap="round"/></svg>
+            <input type="text" id="search" placeholder="Search by name">
+          </div>
+          <div class="catalog" id="catalog"></div>
+        </div>
+      </details>
+
+      <details class="adv" id="whyMissing">
+        <summary>Why isn't a company I care about listed?</summary>
+        <div class="body">
+          <p class="hint" id="whyMissingText" style="margin:0"></p>
+          <input type="text" id="boardEntry" placeholder="https://boards.greenhouse.io/yourcompany, or any careers page">
           <div><button class="ghost" id="addUrl" type="button">Check and add</button></div>
           <div class="status" id="boardStatus"></div>
+          <div id="customBoards"></div>
         </div>
       </details>
     </section>
@@ -1080,6 +1332,7 @@ export function renderIndex(): string {
   </aside>
 </div>
 
+${RUN_MARKUP}
 ${REVIEW_MARKUP}
 
 <footer>
@@ -1088,6 +1341,7 @@ ${REVIEW_MARKUP}
 </footer>
 
 <script>${SCRIPT}
+${RUN_SCRIPT}
 ${REVIEW_SCRIPT}</script>
 </body>
 </html>`;
