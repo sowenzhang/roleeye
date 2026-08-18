@@ -2,6 +2,10 @@
 
 Phases are defined in `architecture.md` §33. Build one at a time. Do not skip ahead.
 
+The remaining work queue is `docs/plan.md`, owned by the `building-roleeye`
+skill (`.github/skills/building-roleeye/`). This file stays what it has always
+been: what shipped, and why. The plan file holds what is left.
+
 | Phase | Scope | Status |
 |---|---|---|
 | — | Repository skeleton | done |
