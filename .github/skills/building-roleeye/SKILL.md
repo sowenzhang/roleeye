@@ -1,6 +1,6 @@
 ---
 name: building-roleeye
-description: Build RoleEye one plan step at a time using a dual-agent loop — a worker agent implements a single task from docs/plan.md while an evaluator agent on a different model independently critiques it for correctness, security, performance, UX and accessibility, with a hard cap of 3 attempts. Use when implementing, continuing, or resuming RoleEye feature work, phases, or plan tasks.
+description: Build RoleEye one plan step at a time using a dual-agent loop — a worker agent implements a single task from docs/plan.md while an evaluator agent on a different model independently critiques it for correctness, security, performance, UX and accessibility. The two negotiate over findings until no blockers remain, and escalate to a human only on genuine deadlock. Use when implementing, continuing, or resuming RoleEye feature work, phases, or plan tasks.
 ---
 
 # Building RoleEye
@@ -16,9 +16,11 @@ docs/plan.md → reserve ONE task, record baseline SHA
                   └─ spawn plan-evaluator (light GPT model, no edit tool)  ← spawned together
 worker implements → WORK REPORT → you forward it → evaluator → REVIEW VERDICT
         ↑                                                          │
-        └──────────── REVISE, max 3 worker attempts ───────────────┘
+        │                        blockers open: fix / withdraw / settle
+        └──────────── negotiate, while blockers keep closing ──────┘
                                                                    │
-                             ACCEPT → you update docs/plan.md → stop and report
+                         no blockers left → SETTLEMENT RECORD → stop and report
+                         3 rounds that close nothing → escalate to the human
 ```
 
 The two agents are defined in `.github/agents/plan-worker.md` and
@@ -50,7 +52,7 @@ which tier you picked and why:
 | Tier | When | What runs |
 |---|---|---|
 | **Direct** | Docs, comments, a rename, a version bump — nothing behavioural | No loop. Do it yourself, run the checks, show the diff. |
-| **Single pass** | Ordinary implementation inside existing patterns | Worker plus one evaluator pass. Attempt cap still 3, but expect 1. |
+| **Single pass** | Ordinary implementation inside existing patterns | Worker plus one evaluator pass. Expect it to close in one round. |
 | **Full loop** | Migrations, trust boundaries, hostile input, auth, money, accessibility surfaces, architecture decisions | The whole protocol below, and consider a stronger evaluator model than the default (see Step 2). |
 
 The tier is a judgement call you announce, not a rule you hide behind. When in
@@ -177,7 +179,8 @@ session):
 - the commands, read from `package.json` rather than assumed: currently
   `npm run typecheck`, `npm test`, `npm run build`, `npm run test:unit`,
   `npm run test:integration`, `npm run catalog:check`
-- `Attempt 1 of 3`
+- `Round 1. The loop continues while blockers are being closed; it stops only on
+  deadlock, so treat a review as a negotiation, not a countdown.`
 - for the evaluator only: `The worker's report will follow in a later message.
   Review the change as the diff from <baseline sha>, which was a clean tree.
   Until the report arrives, read the task and the standards documents and form
@@ -208,25 +211,22 @@ evaluator, plus:
 
 - `git --no-pager diff --stat <baseline sha>` and
   `git --no-pager status --short`
-- `Review the diff from <baseline sha>. Attempt <n> of 3. Return your REVIEW
-  VERDICT.`
+- `Review the diff from <baseline sha>. Round <n>, <k> open blockers. Return your
+  REVIEW VERDICT.`
 
 Do not summarize, soften, or pre-filter the report. Do not add your own opinion
 of the work — your opinion is not part of this loop, and colouring the evaluator's
 input destroys the independence that makes it useful.
 
-If the worker returns `Status: BLOCKED`, do not send it to the evaluator, and do
-**not** release the task back to `todo` — that would put a task a human has to
-decide about back into a queue that will pick it up again, forever. Instead:
+If the worker returns `Status: BLOCKED`, it has hit something it cannot decide —
+not a review disagreement. Do not send it to the evaluator, and do **not** release
+the task back to `todo`, which would return a question a human owes an answer to
+into a queue that will pick it up again, forever. Instead leave the task
+`in-progress`, add `waiting-for-human: <the decision needed>`, and stop.
 
-- before the final attempt: leave the task `in-progress`, add
-  `waiting-for-human: <the decision needed>`, and stop
-- on the final attempt: treat it exactly like an unresolved `REVISE` — set the
-  task to `blocked` and escalate
-
-Either way, record `attempt: <n>` in the plan file before you stop. Attempt
-counts persist whether or not the run reached a verdict; a task that has already
-consumed three attempts must not silently start again at one.
+Record `attempt: <n>` and `stalls: <n>` in the plan file before you stop. Both
+persist whether or not the run reached a verdict, so a task that has already
+burned its way to a deadlock cannot silently start over at zero.
 
 ### Check the reviewer
 
@@ -280,14 +280,46 @@ malformed outputs. Do not guess what the evaluator meant, and never infer an
 - **ACCEPT** → go to Step 5.
 - **ACCEPT_WITH_FOLLOWUPS** → go to Step 5, and record each follow-up as
   described below.
-- **REVISE** and attempt < 3 → forward the `## REVIEW VERDICT` verbatim to the
-  worker with `This is attempt <n+1> of 3. Address the blockers only.` Return to
-  Step 3.
-- **REVISE** and attempt = 3 → **stop the loop.** Do not spawn a fourth attempt
-  and do not resolve the disagreement yourself.
+- **REVISE** → forward the `## REVIEW VERDICT` verbatim to the worker with
+  `This is round <n+1>. Blockers only — fix, contest with evidence, or propose a
+  settlement.` Return to Step 3.
 
-An attempt is one worker work cycle. The first implementation is attempt 1; each
-revision round increments it. The cap is 3 and it is hard.
+### What actually stops the loop
+
+The loop runs until **no open blockers remain**. A blocker closes three ways, all
+of them legitimate: the worker fixes it, the evaluator withdraws it, or the two
+settle on a narrower fix or a bounded deferral. `major` and `minor` findings never
+block; they become follow-ups and the work continues past them.
+
+So a `REVISE` is not a stop. It is the next round of a negotiation, and the worker
+keeps working through it.
+
+What stops the loop is **not moving**. After each round, count the open blockers:
+
+| Round outcome | Meaning | Action |
+|---|---|---|
+| Open blockers went down | Converging | Continue |
+| Open blockers unchanged | Stalled round | Continue, and increment the stall count |
+| Three consecutive stalled rounds | Deadlock — a real disagreement | Escalate |
+| 8 worker attempts on one task | Runaway | Stop regardless, and say so |
+
+Track `attempt` (worker cycles) and `stalls` (consecutive rounds that closed
+nothing) in the plan file, and report both at the end. Three is the number that
+matters, but it now counts *stuck* rounds rather than rounds — a loop making
+steady progress over five rounds is working exactly as intended, and cutting it
+off at three would have thrown away work that was nearly finished.
+
+The runaway ceiling exists because "converging" can be gamed by an agent that
+closes one trivial blocker per round forever. If you hit it, that is what
+happened, and it is worth telling the user.
+
+**On escalation**, set the task to `blocked` in `docs/plan.md` with a one-line
+reason naming the decision it is waiting on, then report to the user: the
+deadlocked blocker, the worker's position, the evaluator's position, the smallest
+change the evaluator says would resolve it, and the one question only a human can
+answer. Leave the working tree as it is. Do not revert the worker's changes, and
+do not settle it yourself — you are the one participant with no independent view
+of the code, which is exactly why you are not qualified to break the tie.
 
 ### Recording follow-ups
 
@@ -316,31 +348,61 @@ contract does not require acceptance criteria and nothing will select it by
 mistake. A malformed entry in Ready now is worse than an honest one in the
 backlog, because the next invocation will hand it to a worker.
 
-**On escalation at attempt 3**, set the task to `blocked` in `docs/plan.md` with
-a one-line reason naming the decision it is waiting on, then report to the user:
-the outstanding blocker, the worker's position, the evaluator's position, the
-smallest change the evaluator says would resolve it, and the one question only a
-human can answer. Leave the working tree as it is. Do not revert the worker's
-changes.
-
-## Step 5 — Close the task, then stop
+## Step 5 — Close the task, write the settlement record, then stop
 
 You, and only you, update `docs/plan.md`:
 
 - flip the task from `in-progress` to `done` with today's date and a one-line
   result — this releases the reservation taken in Step 1
 - add the follow-ups, each as a complete contract-compliant entry per Step 4
-- record `attempts: <n>` and the final verdict on the task line
+- record `attempts`, `stalls` and the final verdict on the task line
 
-If the change involved a real design decision or a trade-off worth remembering,
+### The settlement record
+
+Print this to the user, and append it under the task in `docs/plan.md`. It is the
+point of the whole loop: not that two agents agreed, but *what they agreed to and
+what it cost*. A reader six months from now needs to know which risks were
+accepted deliberately, by whom, and on what reasoning — that is the difference
+between a considered trade-off and an oversight nobody noticed.
+
+```text
+## SETTLEMENT RECORD — <task id> <task title>
+Verdict: <final verdict>   Rounds: <n>   Stalls: <n>
+Worker: <model>            Evaluator: <model>
+
+Built
+- <what now exists that did not before, 2-3 lines>
+
+Blockers raised: <n> — fixed <n>, withdrawn <n>, settled <n>, escalated <n>
+[F1] <category> — FIXED: <what changed>
+[F2] <category> — WITHDRAWN: <why the finding did not hold>
+[F3] <category> — SETTLED: <what was agreed>
+     Residual risk: <what the project is now carrying>
+     Reasoning: <why this was the right price>
+     Tracked as: <follow-up id, or "not tracked, and why">
+
+Trade-offs accepted
+- <the choice, what was given up, and why that was the right side>
+
+Follow-ups created
+- <id> — <title>   (awaiting your approval before it becomes selectable)
+
+Not done, deliberately
+- <what was left alone, and where it belongs>
+```
+
+If a blocker was **escalated**, the record says so and the task is `blocked`, not
+`done`. Never write a settlement record that implies agreement where a human still
+has to decide.
+
+If the change involved a design decision worth remembering beyond this task,
 append one row to the decisions log at the top of `docs/progress.md` — decision
 and rationale, in the voice already used there. Do not write a phase-notes essay
 unless the task completes a whole phase.
 
-Then **stop**. Report to the user in under ten lines: what shipped, the verdict,
-the attempts used, and the next ready task. Ask before starting it. One task per
-skill invocation is the contract; the human stays in the loop between steps,
-which is the same rule RoleEye itself is built on.
+Then **stop**. One task per skill invocation, and ask before starting the next.
+The human stays in the loop between steps, which is the rule RoleEye itself is
+built on.
 
 Do not commit or push unless the user asks.
 
@@ -390,3 +452,7 @@ is a blocker, not a discussion:
 
 The two agent files are project-agnostic and can be copied to any repository as
 they are. See `references/porting.md`.
+
+A full worked run — both agents' messages, a settlement, and the escalation
+branch — is in `references/example-run.md`. Read it before your first run; it is
+faster than inferring the protocol from the rules above.

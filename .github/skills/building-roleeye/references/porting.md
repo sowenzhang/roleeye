@@ -7,6 +7,7 @@ The loop is three parts. Two are generic; one is not.
 | Worker role and report format | `.github/agents/plan-worker.md` | Yes — copy as is |
 | Evaluator role, severities, verdict format | `.github/agents/plan-evaluator.md` | Yes — copy as is |
 | Orchestration and project rules | `.github/skills/<name>/SKILL.md` | No — rewrite |
+| A worked run | `references/example-run.md` | Mostly — swap the task and the code |
 | The plan | `docs/plan.md` | No — rewrite |
 
 ## Steps
@@ -114,6 +115,18 @@ The loop is three parts. Two are generic; one is not.
 - **One tier for everything.** Six model cycles to review a typo is ceremony.
   Tier it: direct for mechanical work, one evaluator pass for ordinary changes,
   the full loop for migrations and trust boundaries.
-- **No attempt cap enforcement.** Three is a cap, not a suggestion. Escalation
-  to a human is the designed outcome for a real disagreement, not a failure of
-  the loop.
+- **A cap that counts the wrong thing.** Capping total rounds punishes a loop
+  that is converging and stops work that was nearly finished. Count *stalled*
+  rounds — ones that closed no blocker — and keep a separate runaway ceiling on
+  total attempts, since "converging" can be gamed by closing one trivial blocker
+  per round.
+- **No settlement path.** If a reviewer's only moves are accept and reject, every
+  disagreement about *price* is forced to look like a disagreement about
+  *existence*, and one side has to capitulate. Let the worker propose a narrower
+  fix or a bounded deferral, and require the reviewer to answer it with a
+  settlement, a condition, or the specific case it leaves open.
+- **No record of what was settled.** The valuable output is not "two agents
+  agreed" but which risks were accepted, by whom, and why. Without that, an
+  accepted trade-off is indistinguishable from an oversight six months later.
+- **No attempt cap enforcement.** Escalation to a human is the designed outcome
+  for a real disagreement, not a failure of the loop.

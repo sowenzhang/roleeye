@@ -19,25 +19,32 @@ selectable.
 - **why** — the reason the work exists, not the remedy.
 - **acceptance** — checkable observables: a command, an output, a state change.
 - The orchestrator reserves a task by setting `in-progress` with `started`,
-  `baseline` (the commit SHA the review is taken from) and `attempt`, **before**
-  spawning agents, and releases it by moving it to `done`, `blocked`, or back to
-  `todo`. `attempt` is updated as the loop runs, so a task that has already spent
-  its three attempts cannot quietly start again at one.
+  `baseline` (the commit SHA the review is taken from), `attempt` and `stalls`,
+  **before** spawning agents, and releases it by moving it to `done`, `blocked`,
+  or back to `todo`. `attempt` counts worker cycles and `stalls` counts
+  consecutive review rounds that closed no blocker; both are updated as the loop
+  runs, so a task that has already argued its way to a deadlock cannot quietly
+  start over at zero.
+- `blocked` means the loop deadlocked — three consecutive rounds closing nothing
+  — with a blocker still open. The reason line names the decision a human owes
+  the loop. It is never used for work that has not been attempted.
 - An interrupted run is **not resumable**. The reports and verdicts lived in the
   orchestrator's context and are gone with it; only `started`, `baseline` and
   `attempt` survive. A reservation found on entry is reported to the human, who
   decides whether to abandon the partial work or restart from a clean tree —
   never silently taken over, and never advertised as a resume.
 - Closes as `done` only after an `ACCEPT` or `ACCEPT_WITH_FOLLOWUPS` verdict, and
-  records `attempts` and the verdict.
-- `blocked` means the 3-attempt cap was reached with an outstanding blocker. The
-  reason line names the decision a human owes the loop. It is never used for work
-  that has not been attempted.
+  records `attempts`, `stalls`, the verdict, and a settlement record naming every
+  blocker that was fixed, withdrawn or settled, with the residual risk of each
+  settlement.
+- `blocked` means the loop deadlocked — three consecutive rounds closing no
+  blocker — with one still open. The reason line names the decision a human owes
+  the loop. It is never used for work that has not been attempted.
 - `folded` means the task was absorbed into another and is kept only as a
   tombstone explaining why. Never selectable. Deleting such an entry would erase
   the reasoning that retired it, which is the part worth keeping.
 - A reservation may also carry `waiting-for-human: <decision>` when the worker
-  reported `BLOCKED` before the final attempt, or `protocol-failure: <reason>`
+  itself reported `BLOCKED`, or `protocol-failure: <reason>`
   when an agent returned output the loop could not route. Both leave the task
   `in-progress` and out of the queue, because both need a person.
 

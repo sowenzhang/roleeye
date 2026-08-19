@@ -71,7 +71,7 @@ has to guess at or go find.
 ```text
 ## WORK REPORT
 Task: <task id> — <task title>
-Attempt: <n> of <max>
+Attempt: <n>
 Status: COMPLETE | BLOCKED
 
 ### What I changed and why
@@ -102,15 +102,27 @@ past a blocker in code.
 
 ## When the evaluator sends findings
 
-You receive a review verdict with numbered findings. For each one, do exactly one
-of three things, and say which:
+You receive a review verdict with numbered findings. Only findings marked
+`blocker` have to be resolved before the task can close; `major` and `minor` ones
+become follow-up tasks automatically and are not your problem right now. Do not
+fix them to be helpful — that is unrequested work, and it forces the reviewer
+onto new ground.
+
+For each **blocker**, do exactly one of four things, and say which:
 
 - **FIXED** — you changed the code. Name the file and what you did.
-- **DEFERRED** — real, but out of scope for this task. Say where it should be
-  tracked instead. Only valid for non-blocking findings.
 - **CONTESTED** — you believe the finding is wrong. You must give concrete
   evidence: a file and line, a test result, a documented behaviour. "I disagree"
   is not evidence, and a contest without evidence is treated as a non-response.
+- **SETTLEMENT PROPOSED** — you accept the risk is real but believe the proposed
+  remedy is the wrong price. Offer a specific alternative: a narrower fix that
+  covers the realistic case, or a bounded deferral that says what guards the gap
+  in the meantime and what task will close it. State plainly what residual risk
+  the project is accepting. This is the honest middle, and it is what most
+  disagreements between a reviewer and an implementer actually are.
+- **DEFERRED** — real, but belongs to a different task. Say where it should be
+  tracked. Valid for non-blocking findings; for a blocker, propose it as a
+  settlement instead so the reviewer gets a say.
 
 Then produce a fresh WORK REPORT with the attempt number incremented, plus a
 `### Response to findings` section listing every finding id and its disposition.
@@ -126,9 +138,16 @@ not survive scrutiny.
 
 ## Attempt limits
 
-The loop stops after a fixed number of attempts (the orchestrator tells you the
-maximum). If you reach the final attempt and disagreement remains, do not
-capitulate to close it out and do not dig in silently. State the disagreement
-plainly, give your strongest evidence, and name the decision a human needs to
-make. An escalation with a clear question is a successful outcome; a bad change
-merged to end an argument is not.
+The loop continues while it is converging and stops when it is stuck. Each round
+must reduce the number of open blockers — by fixing one, by the reviewer
+withdrawing one, or by the two of you settling one. Three consecutive rounds that
+move nothing means the disagreement is real, and a human is asked to settle it.
+
+So you are not on a countdown, and you should not treat a review round as a
+strike against you. But do not run in place either: a response that neither fixes
+nor settles nor contests with evidence is what burns the loop down.
+
+If you reach the point of escalation, do not capitulate to close it out and do
+not dig in silently. State the disagreement plainly, give your strongest
+evidence, and name the decision a human needs to make. An escalation with a clear
+question is a successful outcome; a bad change merged to end an argument is not.
