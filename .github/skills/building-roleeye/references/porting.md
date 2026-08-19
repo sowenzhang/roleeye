@@ -120,6 +120,26 @@ The loop is three parts. Two are generic; one is not.
   rounds — ones that closed no blocker — and keep a separate runaway ceiling on
   total attempts, since "converging" can be gamed by closing one trivial blocker
   per round.
+- **Counting open blockers instead of closures.** The subtler version of the
+  same mistake, and it survived our first real run: if a stall is defined as "the
+  open-blocker count did not fall", then a round that closes two findings and
+  raises two new ones is recorded as a stall. That is backwards — it is the loop
+  working, since a fix that introduces a new claim *should* attract a new
+  finding. Three such rounds would escalate a healthy negotiation. Define a
+  stalled round as one in which **nothing closed**, and let new findings neither
+  reset nor inflate the counter.
+- **No independent expectation before the report.** If the reviewer's first act
+  is to read the author's account of why the work is correct, it is grading a
+  justification, not the work. Spawn it with the worker and require a committed
+  prior — its own answer to the task, what it will verify itself, and where it
+  expects an honest failure — as a *required first output*. Ours replied "ready"
+  in 46 seconds until it was asked twice; the real pre-read then found the
+  constraint that defined what a valid prototype was. Treat an acknowledgement
+  as a non-answer and send it back.
+- **No detector for a repeated class of defect.** The stall counter sees
+  closures, so a worker that keeps making the *same kind* of error in new
+  material looks like steady progress forever. Ask the reviewer to name it as a
+  pattern when it recurs across rounds, because no counter will.
 - **No settlement path.** If a reviewer's only moves are accept and reject, every
   disagreement about *price* is forced to look like a disagreement about
   *existence*, and one side has to capitulate. Let the worker propose a narrower

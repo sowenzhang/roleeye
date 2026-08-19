@@ -22,7 +22,9 @@ selectable.
   `baseline` (the commit SHA the review is taken from), `attempt` and `stalls`,
   **before** spawning agents, and releases it by moving it to `done`, `blocked`,
   or back to `todo`. `attempt` counts worker cycles and `stalls` counts
-  consecutive review rounds that closed no blocker; both are updated as the loop
+  consecutive review rounds in which **no blocker closed** — closures, not the
+  net number of open blockers, because a round that closes two and raises two is
+  progress rather than a stall; both are updated as the loop
   runs, so a task that has already argued its way to a deadlock cannot quietly
   start over at zero.
 - `blocked` means the loop deadlocked — three consecutive rounds closing nothing
