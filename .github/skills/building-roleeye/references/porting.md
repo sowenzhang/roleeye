@@ -53,37 +53,67 @@ The loop is three parts. Two are generic; one is not.
 
 ## What tends to break
 
-- **Same model on both sides.** The loop still runs and produces confident
-  agreement about nothing. Check the evaluator's model explicitly.
+- **Same model on both sides.** Two models with separate context are less likely
+  to share a blind spot — that is the whole claim, and it is worth having. It is
+  not a safety gate: a cheap reviewer is a cheap reviewer. Raise the model for
+  migrations, trust boundaries and architecture decisions, and do not let a light
+  `ACCEPT` be reported as "reviewed and safe". If you want to know what your
+  reviewer is worth, seed a few known defects and see how many it finds.
 - **Assuming the evaluator saw a clean baseline.** Both agents share one working
   tree, so spawning the evaluator first proves nothing about what it read — the
-  worker may write before it looks. Capture a baseline commit SHA (and the
-  pre-existing dirty diff, if any) before spawning, and have the review taken
-  against that SHA. Timing is not a baseline.
-- **No reservation.** If the task stays `todo` while the worker runs, a second
-  invocation or a restart after a crash will start a second worker on the same
-  files. Reserve before spawning; release on done, blocked, or abandonment, and
-  make a stale reservation a question for the human rather than something the
-  orchestrator resolves alone.
+  worker may write before it looks. Record a baseline commit SHA and review the
+  diff from it. Timing is not a baseline.
+- **Starting from a dirty tree.** Requiring a clean tree looks fussy and removes
+  four problems at once: attribution of pre-existing edits, an unbounded diff in
+  every prompt, the exactness of the post-review tree check, and most of the
+  recovery machinery. Take the simplification.
+- **A "resume" that cannot resume.** Reports, verdicts and attempt history live
+  in the orchestrator's context and die with the session. Unless you persist
+  them, an interrupted run can only be abandoned or restarted — say that plainly
+  rather than offering a resume that silently reclassifies the worker's partial
+  edits as pre-existing.
+- **A reservation that reserves nothing.** A status written to a file is not a
+  lock: two sessions can both read `todo` first, and a second worktree never sees
+  it. Either take a real lock or declare one worktree, one loop, as a
+  precondition.
+- **An unclosed state machine.** The attempt cap only terminates the well-formed
+  path. Decide in advance what happens when the worker reports BLOCKED on the
+  last attempt, when a verdict does not parse, when `REVISE` arrives with no
+  blocker, or when `ACCEPT` arrives carrying one. Allow one formatting-only
+  retry that does not consume a worker attempt, then stop and fetch a human.
+  Never infer an ACCEPT from an unparseable reply.
 - **Trusting the read-only claim.** The evaluator has no edit tool, but it has a
-  shell, and a fallback agent may have neither restriction. It is a policy, not
-  a sandbox. Re-check `git status` after the verdict and void the review if the
-  tree moved.
+  shell. It is a policy, not a sandbox. Compare the exact tree state before and
+  after — a full diff plus hashes of untracked files, not `--stat`, which is
+  blind to an edit that keeps the line count and to a rewritten untracked file.
 - **Fallbacks that quietly drop the frontmatter.** If the custom agent types are
-  not available and you fall back to a general-purpose agent, the model and tool
-  restrictions do not come with it. Reapply them by hand, or stop.
+  not available, a general-purpose fallback inherits neither the model nor the
+  tool restrictions, and the spawn interface may offer no way to reimpose the
+  latter. Say so and ask, rather than claiming the restriction was reapplied.
+- **Checklist theatre.** Long lists of angles to cover, each requiring an
+  explicit not-applicable note, teach a small model to spend its attention
+  proving it visited the headings. Ask it to consider the angles internally and
+  report only what applies.
 - **Vague acceptance criteria.** The evaluator cannot check "works well". Every
-  criterion should name an observable: a command, an output, a state change.
-- **Missing invariants.** Without project rules, "blocker" collapses into
-  taste, and the loop stops terminating.
-- **An orchestrator that helps.** If the orchestrator fixes things between
-  rounds, attempt counting becomes meaningless and neither agent is reviewing
-  what actually shipped. Relay verbatim; edit only the plan file.
+  criterion should name an observable: a command, an output, a state change. Beware
+  the criterion that cannot fail — "does not depend on a component that does not
+  exist" is satisfied by doing nothing.
+- **Missing invariants.** Without project rules, "blocker" collapses into taste,
+  and the loop stops terminating.
+- **An orchestrator that helps.** If it fixes things between rounds, attempt
+  counting becomes meaningless and neither agent is reviewing what shipped.
+  Relay verbatim; edit only the plan file.
+- **An orchestrator that authors the backlog.** Turning a one-line follow-up into
+  a task with acceptance criteria is authorship. Show the original and the entry,
+  and get a human's agreement before anything joins the selectable queue.
 - **Anti-escalation rules that swallow real bugs.** Rules against restating
   findings and against raising late ones exist to stop taste from escalating over
   three rounds. They must carve out genuine defects explicitly, or the loop will
   eventually procedure a security hole into `ACCEPT`. Termination is the attempt
   cap's job, not the severity rules'.
+- **One tier for everything.** Six model cycles to review a typo is ceremony.
+  Tier it: direct for mechanical work, one evaluator pass for ordinary changes,
+  the full loop for migrations and trust boundaries.
 - **No attempt cap enforcement.** Three is a cap, not a suggestion. Escalation
   to a human is the designed outcome for a real disagreement, not a failure of
   the loop.

@@ -26,11 +26,35 @@ The two agents are defined in `.github/agents/plan-worker.md` and
 carry the full protocol; this skill carries what is specific to RoleEye. Do not
 duplicate the agents' instructions into your prompts — reference them.
 
-**Your job is orchestration only:** reserve the task, record the baseline, spawn
-both agents, relay messages verbatim, count attempts, enforce the cap, verify the
-reviewer did not touch the tree, update the plan file, and stop. You do not write
-feature code, you do not grade the work, and you do not overrule the evaluator on
-a blocker.
+**Your job is orchestration only:** check the preconditions, reserve the task,
+record the baseline, spawn both agents, relay messages verbatim, count attempts,
+enforce the cap, verify the reviewer did not touch the tree, update the plan
+file, and stop.
+
+Be precise about what that neutrality covers, because it is narrower than it
+sounds. **You do not judge the implementation** — you never write feature code,
+never grade the work, and never overrule the evaluator on a blocker. You *do*
+exercise judgement elsewhere: choosing the task, deciding the review tier below,
+turning a one-line follow-up into a scoped task, and deciding whether a decision
+belongs in the progress log. Those are real editorial powers over what gets
+built next, so they are done visibly and, where they change the queue, with the
+user's agreement. Claiming to be a neutral relay while quietly authoring the
+backlog would be the more comfortable story and the false one.
+
+## Choose the review tier first
+
+The full loop costs up to six model cycles plus verification. That is worth it
+for a migration and absurd for a typo. Match the ceremony to the risk, and say
+which tier you picked and why:
+
+| Tier | When | What runs |
+|---|---|---|
+| **Direct** | Docs, comments, a rename, a version bump — nothing behavioural | No loop. Do it yourself, run the checks, show the diff. |
+| **Single pass** | Ordinary implementation inside existing patterns | Worker plus one evaluator pass. Attempt cap still 3, but expect 1. |
+| **Full loop** | Migrations, trust boundaries, hostile input, auth, money, accessibility surfaces, architecture decisions | The whole protocol below, and consider a stronger evaluator model than the default (see Step 2). |
+
+The tier is a judgement call you announce, not a rule you hide behind. When in
+doubt, go up a tier.
 
 ## Step 1 — Load context and pick exactly one task
 
@@ -50,38 +74,41 @@ contract.
 Announce the chosen task to the user in one line. If zero tasks are ready, say
 that and stop — do not invent work.
 
-### Reserve the task, and record the baseline
+### Preconditions, reservation, and baseline
 
-Two bookkeeping steps must happen **before** any agent is spawned, because both
-of them are unrecoverable afterwards.
+Three things must be true or done **before** any agent is spawned.
 
-1. **Reserve.** Set the task's status to `in-progress` in `docs/plan.md` and add
-   `started: <date>`. A task left `todo` while a worker is running invites a
-   second invocation, or a restart after an interruption, to pick up the same
-   task and run a second worker against the same files.
+1. **A clean working tree, and one loop at a time.** If `git status --porcelain`
+   is not empty, stop and ask the user to commit, stash or discard. This
+   precondition is doing a great deal of work: it makes the baseline exactly
+   `HEAD`, it removes any question of whether an edit is the worker's, it keeps
+   an unbounded diff out of the agents' prompts, and it makes the post-review
+   tree check exact. Do not work around it.
 
-   On entry, if a task is already `in-progress`, do not spawn anything. Report it
-   to the user with its `started` date and ask whether to resume it, release it
-   back to `todo`, or take it over. A crashed run leaves a stale reservation, and
-   only a human can tell the difference between stale and live.
+   This skill assumes **one working tree and one active loop**. It has no lock: a
+   reservation written to a file cannot stop a second session that read the file
+   first, and a second worktree never sees it at all. Do not run two loops
+   against one checkout.
 
-2. **Record the baseline.** Capture and keep in your own context:
+2. **Reserve the task.** In `docs/plan.md`, set the task to `in-progress` and add
+   `started: <date>`, `baseline: <sha>`, `attempt: 1`. Those three fields are the
+   run's durable state — everything else lives only in this session's context and
+   dies with it.
 
-   ```powershell
-   git rev-parse HEAD
-   git --no-pager status --short
-   git --no-pager diff
-   ```
+   On entry, if any task is already `in-progress`, do not spawn anything. Report
+   it to the user with its `started` date and ask them to choose. Be honest about
+   the options: an interrupted run **cannot be resumed** — the attempt history,
+   the reports and the verdicts are gone with the session that held them. The
+   real choices are to abandon it (revert or keep the partial work as a human
+   decision, then set the task back to `todo`) or to restart it from a clean
+   tree. Do not offer "resume" as though it were free.
 
-   This is the immutable reference the review is taken against. Both agents share
-   one working tree, so "the evaluator started first" guarantees nothing about
-   what it observed — the worker may write before the evaluator reads. A commit
-   SHA plus the pre-existing dirty diff does not race. If the tree is dirty at
-   the start, say so to the user and include that diff in the evaluator's prompt,
-   so pre-existing changes are never attributed to the worker.
+3. **Record the baseline.** `git rev-parse HEAD`. With a clean tree that is the
+   whole baseline. Both agents share one working tree, so "the evaluator started
+   first" guarantees nothing about what it read — the worker may write before the
+   evaluator looks. A commit SHA does not race; timing does.
 
-If reservation or baseline capture fails, stop. Do not spawn a worker you cannot
-later account for.
+If any of these fails, stop. Do not spawn a worker you cannot later account for.
 
 ## Step 2 — Spawn both agents together
 
@@ -94,21 +121,47 @@ what it did. Its view of *the code* comes from the baseline SHA, not from timing
 **Evaluator** — agent type `plan-evaluator`, model `gpt-5.6-luna`, and no `edit`
 tool.
 
-If those agent types are not offered by the task tool, fall back to
-`general-purpose` and begin the prompt with: `Read and follow
+If those agent types are not offered by the task tool, the fallback is
+`general-purpose` with a prompt beginning `Read and follow
 .github/agents/plan-worker.md` (or `plan-evaluator.md`) `completely; it defines
-your role. Then:`. For the evaluator fallback you must also reproduce by hand
-what its frontmatter would have applied, because a fallback inherits none of it:
+your role. Then:`.
 
-- pass the model override explicitly
-- restrict its tools to the read-only set (`read`, `search`, `execute`, `web`);
-  never hand a fallback evaluator an edit tool
-- state in the prompt that it may run only verifying commands, and that any
-  write to the working tree is a protocol violation that voids its verdict
+For the worker that is a fair substitute. For the evaluator it is not, and you
+must say so rather than paper over it: a fallback inherits none of the
+frontmatter, and the spawn interface exposes a model override but **no per-agent
+tool whitelist**. The read-only boundary therefore cannot be enforced at all on
+this path — it degrades from a policy to a request. So:
+
+- pass the model override explicitly; it is the one restriction you can enforce
+- put the read-only rule in the prompt, and state that any write to the working
+  tree is a protocol violation that voids the verdict
+- **tell the user the boundary is unenforced on this path and ask before
+  proceeding.** Do not describe the restrictions as "reapplied" — they are not.
+  The post-review tree check in Step 3 becomes the only real control, which is
+  detection after the fact, not prevention.
+
+Preferably, fix the cause: register the custom agents (`/skills reload` and a
+restart) so the frontmatter applies.
 
 The evaluator **must** run on a different model from the worker. If it cannot,
-stop and tell the user rather than running both on one model — a same-model
-review is close to worthless here.
+stop and tell the user rather than running both on one model.
+
+### What the second model is, and is not
+
+`gpt-5.6-luna` is a deliberately cheap independent second pass. Two different
+models with separate context are less likely to share a blind spot, and that is
+the whole of the claim. It is **not** a safety gate, and nothing here has been
+measured: no seeded-defect benchmark has been run, so treat its clean verdicts as
+weak evidence rather than assurance.
+
+Consequences worth acting on:
+
+- On a **full tier** task — a migration, a trust boundary, hostile input,
+  accessibility, an architecture decision — raise the evaluator to a stronger
+  model, or add a specialist pass (`security-review`, `code-review`) alongside
+  it. Cheap review of the changes that can actually hurt you is a false economy.
+- Never present an `ACCEPT` from the light evaluator to the user as "reviewed and
+  safe". Report which model gave the verdict, so its weight is visible.
 
 Both prompts must include, in full (they are stateless and cannot see this
 session):
@@ -118,7 +171,7 @@ session):
   with `git rev-parse --show-toplevel`, never a remembered path — together with
   the operating system and shell you actually detected, and the path separator
   they imply
-- the baseline commit SHA, and the pre-existing dirty diff if there was one
+- the baseline commit SHA
 - the standards documents to obey: `agent.md`, `architecture.md`, and the
   RoleEye invariants listed in Step 5 below
 - the commands, read from `package.json` rather than assumed: currently
@@ -126,13 +179,27 @@ session):
   `npm run test:integration`, `npm run catalog:check`
 - `Attempt 1 of 3`
 - for the evaluator only: `The worker's report will follow in a later message.
-  Review the change as the diff from <baseline sha>, not as whatever the working
-  tree happens to hold when you first look at it. Until the report arrives, read
-  the task and the standards documents and form your own expectation of what a
-  correct change looks like. Do not modify the working tree; it is checked.`
+  Review the change as the diff from <baseline sha>, which was a clean tree.
+  Until the report arrives, read the task and the standards documents and form
+  your own expectation of what a correct change looks like. Do not modify the
+  working tree; it is checked byte for byte.`
 
 Then end your turn and wait for the worker's completion notification. Do not
 poll.
+
+### When the task is a decision, not a change
+
+Some plan tasks (`P9-0` is the first) produce a recorded decision rather than
+shipped code. The loop is unchanged, but two things are:
+
+- tell the worker plainly that prototypes are throwaway, that the deliverable is
+  the written comparison and the updated design document, and that nothing from
+  the spike is to be left in `src/`
+- tell the evaluator that this is a decision task, so it reviews the reasoning
+  and the evidence rather than a diff — the agent file has a section for it
+
+The baseline SHA and the tree check still apply. A spike that quietly leaves a
+prototype behind is exactly the kind of thing they exist to catch.
 
 ## Step 3 — Relay the work report
 
@@ -148,23 +215,67 @@ Do not summarize, soften, or pre-filter the report. Do not add your own opinion
 of the work — your opinion is not part of this loop, and colouring the evaluator's
 input destroys the independence that makes it useful.
 
-If the worker returns `Status: BLOCKED`, skip the evaluator, release the
-reservation by setting the task back to `todo` with a one-line reason, and take
-the block to the user with the specific decision that would unblock it.
+If the worker returns `Status: BLOCKED`, do not send it to the evaluator, and do
+**not** release the task back to `todo` — that would put a task a human has to
+decide about back into a queue that will pick it up again, forever. Instead:
+
+- before the final attempt: leave the task `in-progress`, add
+  `waiting-for-human: <the decision needed>`, and stop
+- on the final attempt: treat it exactly like an unresolved `REVISE` — set the
+  task to `blocked` and escalate
+
+Either way, record `attempt: <n>` in the plan file before you stop. Attempt
+counts persist whether or not the run reached a verdict; a task that has already
+consumed three attempts must not silently start again at one.
 
 ### Check the reviewer
 
 The evaluator has no edit tool, but it does have a shell, and a shell can write.
-That boundary is a policy, not a sandbox, so verify it rather than trusting it:
-after each verdict, run `git --no-pager status --short` and
-`git --no-pager diff --stat <baseline sha>` again and compare against what the
-worker reported touching.
+That boundary is a policy, not a sandbox, so verify it — and verify it exactly,
+because `--stat` is not evidence. Line counts can be identical after an edit, and
+an untracked file can be rewritten without moving `git status` at all.
 
-If the evaluator changed anything, its verdict is void. Tell the user, show the
-unexpected paths, and stop. Do not silently revert — a reviewer that edited the
-code under review is a fact the human needs to see.
+Before handing the report to the evaluator, capture:
+
+```powershell
+git --no-pager diff <baseline sha> | Out-String
+git status --porcelain=v1 -uall
+git ls-files --others --exclude-standard | Get-FileHash
+```
+
+Capture the same three after the verdict and compare them **exactly**, not by
+eye and not against the worker's list of files.
+
+If anything differs, the verdict is void. Tell the user, show what moved, and
+stop. Do not silently revert — a reviewer that edited the code under review is a
+fact the human needs to see. This is detection, not prevention; it is the honest
+limit of what this layer can do without an isolated checkout.
 
 ## Step 4 — Route the verdict
+
+### Validate it first
+
+An instruction is not a schema, and the evaluator can return something the
+protocol has no route for. Check before you route, because improvising here is
+where your neutrality actually leaks. A verdict is **invalid** if it:
+
+- has no `Verdict:` line, or one that is not `ACCEPT`, `ACCEPT_WITH_FOLLOWUPS`
+  or `REVISE`
+- says `REVISE` with no finding marked `blocker`
+- says `ACCEPT` or `ACCEPT_WITH_FOLLOWUPS` while listing a `blocker`
+- is truncated mid-structure
+
+On the first invalid verdict, return it to the evaluator once with: `Your verdict
+did not parse: <the specific defect>. Re-issue it in the required format. Do not
+change your findings or your reasoning — this is a formatting correction.` That
+retry **does not consume a worker attempt**; the worker has done nothing wrong.
+
+If the re-issued verdict is still invalid, stop. Record `protocol-failure` on the
+task with the reason, leave it `in-progress`, and take it to the user with both
+malformed outputs. Do not guess what the evaluator meant, and never infer an
+`ACCEPT` from an unparseable reply.
+
+### Then route
 
 - **ACCEPT** → go to Step 5.
 - **ACCEPT_WITH_FOLLOWUPS** → go to Step 5, and record each follow-up as
@@ -189,6 +300,15 @@ defect rather than the remedy, and `acceptance` criteria stating an observable �
 a command, an output, a state change. Tag it `(from <task id> review)`, and carry
 the evaluator's `Recommend` line into the acceptance criteria where it is already
 concrete enough to check.
+
+Be aware of what you are doing here. Turning one line from a light model into a
+scoped task with acceptance criteria is authorship, not transcription — you are
+deciding what future work means. So:
+
+- **show the user both** the evaluator's original line and the entry you wrote
+- **get their confirmation before adding anything to Ready now.** Backlog entries
+  you may add and report; selectable tasks a human approves. A queue that grows
+  itself from review chatter is how scope arrives without anyone choosing it.
 
 If you cannot state checkable acceptance criteria for a follow-up, it is not a
 task yet. Put it in the backlog section as a gap entry with its reason, where the

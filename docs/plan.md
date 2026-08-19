@@ -14,20 +14,32 @@ selectable.
 **Selectable tasks (Ready now):**
 
 - **id** — `P<phase>-<n>` for phase work, `G-<n>` for a promoted gap.
-- **status** — `todo`, `in-progress`, `done`, or `blocked`.
+- **status** — `todo`, `in-progress`, `done`, `blocked`, or `folded`.
 - **depends** — task ids, or `—`.
 - **why** — the reason the work exists, not the remedy.
 - **acceptance** — checkable observables: a command, an output, a state change.
-- The orchestrator reserves a task by setting `in-progress` with a `started` date
-  **before** spawning agents, and releases it by moving it to `done`, `blocked`,
-  or back to `todo`. A task found `in-progress` at the start of a run is reported
-  to the human, never silently taken over — a stale reservation and a live one
-  look identical from here.
+- The orchestrator reserves a task by setting `in-progress` with `started`,
+  `baseline` (the commit SHA the review is taken from) and `attempt`, **before**
+  spawning agents, and releases it by moving it to `done`, `blocked`, or back to
+  `todo`. `attempt` is updated as the loop runs, so a task that has already spent
+  its three attempts cannot quietly start again at one.
+- An interrupted run is **not resumable**. The reports and verdicts lived in the
+  orchestrator's context and are gone with it; only `started`, `baseline` and
+  `attempt` survive. A reservation found on entry is reported to the human, who
+  decides whether to abandon the partial work or restart from a clean tree —
+  never silently taken over, and never advertised as a resume.
 - Closes as `done` only after an `ACCEPT` or `ACCEPT_WITH_FOLLOWUPS` verdict, and
   records `attempts` and the verdict.
 - `blocked` means the 3-attempt cap was reached with an outstanding blocker. The
   reason line names the decision a human owes the loop. It is never used for work
   that has not been attempted.
+- `folded` means the task was absorbed into another and is kept only as a
+  tombstone explaining why. Never selectable. Deleting such an entry would erase
+  the reasoning that retired it, which is the part worth keeping.
+- A reservation may also carry `waiting-for-human: <decision>` when the worker
+  reported `BLOCKED` before the final attempt, or `protocol-failure: <reason>`
+  when an agent returned output the loop could not route. Both leave the task
+  `in-progress` and out of the queue, because both need a person.
 
 **Backlog entries (Named gaps, Speculative and gated):**
 
@@ -86,21 +98,73 @@ the Phase 5 form-answering work from `docs/vision.md` §8.
 
 ## Ready now
 
-### P9-1 — Tauri shell over the existing portal
+### P9-0 — Decide the desktop shell: Tauri, Wails, or no native shell
 - status: todo
 - depends: —
-- why: `docs/vision.md` §3 and §10 put the desktop shell next. It is a shell
-  around the CLI, not a rewrite: Tauri loads the existing portal over
-  `127.0.0.1` and runs the Node CLI as a sidecar, so there is one UI
-  implementation and the no-bundler constraint holds.
+- why: `docs/vision.md` §3.1 names Tauri, but it argues for a *property* — a
+  window that loads `127.0.0.1` and supervises the Node CLI as a sidecar — and
+  then reaches Tauri as the way to get it. Several toolchains have that property.
+  The same section already refuses to answer the bundled-runtime question by
+  taste, and the framework underneath it deserves the same treatment. Deciding
+  this once, with numbers, is cheaper than discovering it during P9-3 or G-4.
+  This is a spike: its deliverable is a recorded decision, not shipped code.
 - acceptance:
-  - [ ] a Tauri app opens the existing portal; no portal HTML or logic is
-        duplicated into the shell
+  - [ ] a written comparison in `docs/` judges at least three candidates against
+        one set of criteria: **Tauri** (Rust), **Wails** (Go), and **no native
+        shell** — the browser portal plus a launcher or tray helper. The third is
+        not a formality; a comparison of two frameworks that never asks whether a
+        framework is needed is rigged.
+  - [ ] each candidate is taken as far as a throwaway prototype that opens the
+        existing portal over `127.0.0.1` and starts and stops the Node CLI as a
+        sidecar — or the specific point where it failed is recorded
+  - [ ] measured numbers, not vendor claims: installer size, cold start, resident
+        memory, and clean build time, on this machine, stated with how they were
+        measured
+  - [ ] states what each option costs against the `architecture.md` rule that
+        `tsc` is the only build step, and which toolchain each adds to a
+        contributor's machine
+  - [ ] answers whether the choice constrains a future local analytics MCP server
+        (G-9) or is orthogonal to it, and shows the reasoning rather than
+        asserting the answer
+  - [ ] covers Windows first — native toast delivery, Task Scheduler interaction,
+        code signing and the update path (G-4) — and says plainly what is
+        unverified on macOS and Linux
+  - [ ] answers the open question in `docs/vision.md` §3.1, bundled Node runtime
+        against required install, with measured installer sizes for both
+  - [ ] the recommendation states the strongest argument against itself, and the
+        condition that would reverse it
+  - [ ] `docs/vision.md` §3 and §3.1 are updated to match the outcome — including
+        if the outcome is that Tauri was right — and one row is added to the
+        decisions log in `docs/progress.md`
+  - [ ] no prototype code is merged into `src/`
+
+### P9-1 — Desktop shell over the existing portal
+- status: todo
+- depends: P9-0
+- why: `docs/vision.md` §3 and §10 put the desktop shell next. It is a shell
+  around the CLI, not a rewrite: the window loads the existing portal over
+  `127.0.0.1` and the Node CLI runs as a sidecar, so there is one UI
+  implementation and the no-bundler constraint holds. The toolchain is whatever
+  P9-0 concluded; this task does not reopen it.
+- acceptance:
+  - [ ] the shell chosen in P9-0 opens the existing portal; no portal HTML or
+        logic is duplicated into it
   - [ ] the CLI runs as a managed sidecar, started and stopped with the window
   - [ ] the portal still works unchanged via `roleeye ui` in a browser
   - [ ] the shell binds nothing beyond `127.0.0.1`
-  - [ ] the decision on whether the sidecar bundles a Node runtime or requires an
-        installed one is recorded in `docs/progress.md`, with the reason
+  - [ ] the bundled-runtime decision from P9-0 is implemented as decided
+  - [ ] **a production build command exists and is documented**, and the built
+        artefact launches on a machine that is not the development checkout.
+        `npm run build`, `npm run typecheck` and `npm test` are the existing
+        checks and none of them builds a shell; a task that ships only a
+        dev-mode scaffold satisfies them and delivers nothing.
+  - [ ] the app starts with no retrieval service present, and never requires one
+        (`docs/vision.md` §10: Phase 7 must not be a hard dependency of the
+        adoption shell)
+  - [ ] lifecycle smoke checks pass and are recorded: sidecar startup failure is
+        surfaced rather than hung on; a port collision is handled; a sidecar
+        crash is reported to the user; closing the window leaves no orphan
+        process
   - [ ] `npm run build`, `npm run typecheck` and `npm test` pass unchanged
 
 ### P9-2 — First-run engine selection
@@ -117,18 +181,25 @@ the Phase 5 form-answering work from `docs/vision.md` §8.
   - [ ] a user who picks a local model is told which models are actually
         installed, not offered ones they have not pulled
 
-### P9-3 — Schedule management and native notifications in the shell
+### P9-3 — Native notifications and deep links
 - status: todo
 - depends: P9-1
-- why: the unattended loop is the product. If the shell cannot show the next run
-  time and deliver a toast, the app is a viewer for work the user must still
-  start by hand.
+- why: schedule management already exists in the portal (`src/portal/run-page.ts`
+  shows the next run and installs and removes schedules), so P9-1 brings it into
+  the app for free. What is genuinely missing is the shell's half: a native
+  notification delivered with no terminal attached, and a link in it that opens
+  the app on the right record. Without that the unattended loop has no way to
+  reach the user.
 - acceptance:
-  - [ ] the next scheduled run time is visible in the app
-  - [ ] a schedule can be installed, inspected and removed from the app, and
-        from the CLI, with the same result
-  - [ ] a native notification is delivered with no terminal attached
-  - [ ] every notification links to the local record behind it
+  - [ ] a native notification is delivered by a scheduled run with no terminal
+        attached and the app closed
+  - [ ] clicking a notification opens the app directly on the record behind it,
+        by URI or deep link, and does so when the app was not already running
+  - [ ] the existing portal schedule controls still work inside the shell — this
+        is a regression check, not new implementation
+  - [ ] notification text derived from a posting is escaped; a title containing
+        quotes or control characters cannot break the notification payload
+        (see the Phase 3.5 notes in `docs/progress.md`)
 
 ### P9-4 — Live run log
 - status: todo
@@ -144,27 +215,33 @@ the Phase 5 form-answering work from `docs/vision.md` §8.
   - [ ] the log is readable by a screen reader and navigable by keyboard, and no
         state is conveyed by colour alone
 
-### P9-5 — Assisted application, stopping at submit
+### P9-5 — Application handoff
 - status: todo
 - depends: P9-1, P9-4
-- why: `agent.md` and `docs/vision.md` §6.4 draw the line here. Filling a form is
-  assistance; submitting it is an assertion the user cannot retract.
+- why: `agent.md` and `docs/vision.md` §6.4 draw the line here. The app gathers
+  what the human needs and then gets out of the way. Note that `architecture.md`
+  places assisted application in Phase 9 while `docs/vision.md` §10 sequences
+  application assistance last — this task is deliberately the narrow reading:
+  **handoff only, no browser or form automation of any kind.** Populating fields
+  on a live site stays in gated P10b, behind the §6.3 controls.
 - acceptance:
   - [ ] the app opens the posting, presents the archetype resume and the drafted
         answers, and stops
-  - [ ] no code path in the shell can submit an application, and a test asserts it
+  - [ ] no code path in the shell drives a browser, fills a field, or submits;
+        a test asserts it
   - [ ] every claim shown traces to an approved fact
-  - [ ] the human's submit action is recorded as an application record
+  - [ ] the application record is created by an explicit user action ("record
+        that I submitted"), never inferred — submission happens on a site the
+        app cannot observe, so claiming to detect it would be a lie in the data
 
 ### P9-6 — Phase 7 is optional at runtime
-- status: todo
-- depends: P9-1
-- why: `docs/vision.md` §10 — a speculative phase must not be a hard dependency
-  of the adoption shell.
-- acceptance:
-  - [ ] the app starts, runs and answers with no retrieval service present
-  - [ ] a missing retrieval service degrades a feature with an explanation and
-        never fails a run
+- status: folded
+- into: P9-1
+- why: Phase 7 does not exist, so "the app does not require it" is satisfied by
+  changing nothing — a criterion that cannot fail is not a task. The startup half
+  is now a P9-1 acceptance criterion. Graceful degradation of retrieval features
+  becomes a real requirement only once there is a retrieval feature to degrade,
+  and belongs to P7 at that point.
 
 ---
 
@@ -215,6 +292,19 @@ From `docs/vision.md` §11. Each is a real hole; none is started. Promote to
   authorisation regimes. Partly absorbed by P9-3 and P9-4 for new surfaces; the
   existing portal and CLI output have never been audited.
 
+### G-9 — Local analytics MCP server
+- status: deferred
+- why: the career history is a local SQLite database that only RoleEye's own
+  commands can reach. Exposing it as a local MCP server would let a coding agent
+  the user already owns ask questions of it directly, which is the same argument
+  that made the agent-as-reasoner (10a) the cheapest engine. It is named here
+  because it is a plausible long-term shape, not because it is scheduled — and
+  P9-0 must say whether the desktop shell choice constrains it or is orthogonal
+  to it, since deciding that later is the expensive order.
+- open: whether the server is part of the Node CLI (likely) or of the shell; and
+  whether read-only SQL over career history is safe to expose to an agent whose
+  context also holds attacker-authored posting text.
+
 ---
 
 ## Speculative and gated
@@ -223,7 +313,10 @@ From `docs/vision.md` §11. Each is a real hole; none is started. Promote to
 - status: deferred
 - why: build only if the tool is in daily use and the database holds enough
   history for semantic retrieval to beat the structured search that already
-  ships in Phase 6. Must never become a hard dependency of Phase 9.
+  ships in Phase 6. Must never become a hard dependency of Phase 9 — and when it
+  exists, it owns the requirement that a missing retrieval service degrades a
+  feature with an explanation rather than failing a run (the live half of the
+  folded P9-6).
 
 ### P8 — Learning loop
 - status: deferred

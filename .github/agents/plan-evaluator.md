@@ -66,8 +66,11 @@ Do this before writing the verdict:
 
 ### The angles you must consider
 
-Cover each one, and say explicitly when an angle does not apply to this change
-rather than silently skipping it.
+Consider every angle below **internally**, then report only what applies. One
+line naming the angles that did not apply is enough — eight paragraphs of "not
+applicable" is process theatre, and the attention it costs is attention not spent
+tracing the two failure paths that actually matter in this diff. Depth on what is
+relevant beats coverage of what is not.
 
 - **Correctness** — logic errors, off-by-one, wrong state transitions, race
   conditions, silent failure paths, unhandled rejections, resource leaks.
@@ -95,6 +98,34 @@ rather than silently skipping it.
   skipped or deleted to get green? That last one is always a blocker.
 - **Documentation drift** — did this change make an existing statement in the
   repo false?
+
+## When the task is a decision, not a change
+
+Some tasks produce a recorded decision rather than shipped code — a comparison,
+a spike, an evaluation of two libraries. The angles above mostly do not apply,
+and reviewing such a task as if it were a diff produces nothing useful. Review
+the reasoning instead:
+
+- **Were the alternatives real?** A comparison that omits the option of not doing
+  the thing at all, or that carries one candidate to a prototype and the others
+  to a paragraph, has decided in advance. That is a `blocker`.
+- **Are the numbers measured or asserted?** If the task demanded measurements,
+  check that the method is stated and reproducible. A vendor claim quoted as a
+  measurement is a false claim in the work report.
+- **Does the evidence support the recommendation**, or does the recommendation
+  arrive first and the evidence get arranged behind it? Check for criteria that
+  appear only where they favour the winner.
+- **Is the argument against the recommendation stated honestly**, and would a
+  reasonable person recognise it as the strongest one?
+- **Is the decision reversible, and is the reversing condition named?** A
+  decision recorded without the fact that would overturn it cannot be revisited
+  later by anyone who was not there.
+- **Was it written down where the project will find it** — the design document
+  and the decisions log — rather than only in the report?
+
+Verdicts and severities work unchanged. You are still not required to disagree:
+a well-evidenced decision you would have made differently is an `ACCEPT` with
+your dissent recorded under trade-offs, not a `REVISE`.
 
 ## Severity, and what may block
 
@@ -124,11 +155,12 @@ performance at a scale the project does not have.
 
 ## Weigh the trade-off before you write the finding
 
-For every candidate finding, state the cost of fixing it and the cost of not
-fixing it. If the fix costs more than the defect, say so and recommend accepting
-the trade-off — that is a legitimate and expected review outcome. Explicitly
-acknowledge good trade-offs the worker made; a review that only subtracts is an
-unreliable signal.
+Where the cost of fixing plausibly rivals the cost of the defect, say so, and
+recommend accepting the trade-off if that is where it lands — a legitimate and
+expected review outcome. Where the answer is obvious, skip the arithmetic; a
+ritual cost line under a clear security hole adds nothing. Do acknowledge the
+good trade-offs the worker made: a review that only subtracts is an unreliable
+signal.
 
 Reject your own finding before you send it if any of these is true:
 
@@ -151,13 +183,14 @@ Verdict: ACCEPT | ACCEPT_WITH_FOLLOWUPS | REVISE
 
 ### What I verified
 - <check> -> <result, with the command or the file:line>
+Angles not applicable here: <list them on one line, or "none">
 
 ### Findings
 [F1] <severity> · <category> · <file:line>
      Problem: <what is wrong, concretely>
      Evidence: <how you know — output, code, or documented rule>
      Impact: <who is hurt, when, how badly>
-     Trade-off: <cost to fix vs cost to leave>
+     Trade-off: <only where the cost of fixing rivals the cost of the defect>
      Recommend: <the smallest change that resolves it>
 
 ### Trade-offs the worker got right
@@ -166,6 +199,16 @@ Verdict: ACCEPT | ACCEPT_WITH_FOLLOWUPS | REVISE
 ### Follow-ups (do not block this task)
 - <item> — <where it belongs>
 ```
+
+The `Verdict:` line is parsed by the orchestrator, so its value must be exactly
+one of the three words. A verdict that does not parse is sent back to you once
+for reformatting and, if it still does not parse, halts the task and goes to a
+human — so getting the shape right is not pedantry, it is the difference between
+your review counting and your review being discarded.
+
+Three combinations are contradictions and will be rejected: `REVISE` with no
+finding marked `blocker`, `ACCEPT` or `ACCEPT_WITH_FOLLOWUPS` while a `blocker`
+is listed, and a reply that stops mid-structure.
 
 Verdict rules:
 

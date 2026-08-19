@@ -25,7 +25,7 @@ been: what shipped, and why. The plan file holds what is left.
 | 6.6 | Run control: portal-driven runs with live progress, schedule management, prompt review, addressable views | done |
 | 7 | Career memory / local RAG | speculative |
 | 8 | Learning loop | speculative |
-| 9 | Desktop application shell (Tauri over the portal, CLI as sidecar) | planned (see `docs/vision.md`) |
+| 9 | Desktop application shell over the portal, CLI as sidecar | planned (toolchain decided by `docs/plan.md` P9-0) |
 | 10a | Agent CLI as a reasoner (Copilot CLI, all tools denied) | done |
 | 10b | Tool-using agent / application assistant | gated on the controls in `docs/vision.md` §6.3 |
 | — | VPS sync and private job site | deferred, not planned |
