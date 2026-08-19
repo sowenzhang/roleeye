@@ -7,17 +7,45 @@ agent, and closed here by the orchestrator.
 ## Contract
 
 This file has a fixed shape so the skill can read and update it mechanically.
+The contract binds **selectable tasks** — the entries under *Ready now*. Backlog
+entries below that section are deliberately looser, and nothing there is
+selectable.
 
-- Every task has an **id** (`P<phase>-<n>`), a **status**, **depends**, a **why**,
-  and **acceptance** criteria written as checkable observables.
-- `status` is one of `todo`, `in-progress`, `done`, `blocked`, `deferred`.
-- Only the orchestrator edits this file. The worker agent must never touch it.
-- A task closes as `done` only after an `ACCEPT` or `ACCEPT_WITH_FOLLOWUPS`
-  verdict, and records `attempts` and the verdict.
-- Review follow-ups are appended as new `todo` tasks tagged `(from <id> review)`,
-  never folded silently into the task being closed.
+**Selectable tasks (Ready now):**
+
+- **id** — `P<phase>-<n>` for phase work, `G-<n>` for a promoted gap.
+- **status** — `todo`, `in-progress`, `done`, or `blocked`.
+- **depends** — task ids, or `—`.
+- **why** — the reason the work exists, not the remedy.
+- **acceptance** — checkable observables: a command, an output, a state change.
+- The orchestrator reserves a task by setting `in-progress` with a `started` date
+  **before** spawning agents, and releases it by moving it to `done`, `blocked`,
+  or back to `todo`. A task found `in-progress` at the start of a run is reported
+  to the human, never silently taken over — a stale reservation and a live one
+  look identical from here.
+- Closes as `done` only after an `ACCEPT` or `ACCEPT_WITH_FOLLOWUPS` verdict, and
+  records `attempts` and the verdict.
 - `blocked` means the 3-attempt cap was reached with an outstanding blocker. The
-  reason line names the decision a human owes the loop.
+  reason line names the decision a human owes the loop. It is never used for work
+  that has not been attempted.
+
+**Backlog entries (Named gaps, Speculative and gated):**
+
+- **id** and **why** are required. **status** is `deferred` or `gated`.
+  `depends` is optional; `acceptance` is usually absent by design.
+- `deferred` means real but unscheduled. `gated` means held by a design
+  precondition rather than by a failed attempt.
+- Promoting an entry means giving it acceptance criteria and a `todo` status and
+  moving it under *Ready now*. That is a deliberate act, not something the
+  orchestrator does on its way past.
+
+**Both:**
+
+- Only the orchestrator edits this file. The worker agent must never touch it.
+- Review follow-ups are appended as complete entries in whichever section they
+  qualify for, tagged `(from <id> review)`, never folded silently into the task
+  being closed. A follow-up without checkable acceptance criteria belongs in the
+  backlog, not in Ready now.
 
 Phase definitions live in `architecture.md` §33. Rationale and history live in
 `docs/progress.md`. Product direction lives in `docs/vision.md`. This file holds
@@ -205,7 +233,7 @@ From `docs/vision.md` §11. Each is a real hole; none is started. Promote to
   present correlation as causation.
 
 ### P10b — Tool-using agent / application assistant
-- status: blocked
+- status: gated
 - reason: gated by design on the controls in `docs/vision.md` §6.3 — agent
   workspace with junction and symlink escapes blocked, a real sandbox, per-task
   approval, a recorded transcript, workspace-scoped writes and refused egress.
