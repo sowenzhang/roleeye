@@ -40,7 +40,9 @@ the machine, and a direct API key still works. Neither is the onboarding story.
 Two front ends over one engine, both first-class:
 
 - **The CLI**, for people who prefer a terminal and their own scheduler.
-- **A desktop app (Tauri)**, for everyone else.
+- **A desktop app**, for everyone else — a tray helper that supervises the CLI
+  and renders in the browser you already have. Not a native window; §3.1 says
+  why, with numbers.
 
 Neither is a reimplementation. Anything the app does, the CLI must be able to
 do, because that is what keeps the logic testable.
@@ -57,23 +59,62 @@ The app has five jobs:
 5. **Act.** Open a chosen role, present the tailored resume and drafted answers,
    and hand control back for the final step.
 
-### 3.1 Why Tauri, and the constraint it has to respect
+### 3.1 What the shell is, and why it is not Tauri
 
-`architecture.md` bans bundlers: `tsc` is the only build step. A conventional
-Tauri app would add a Rust toolchain *and* a frontend bundler, which breaks
-that.
+This section used to say "Why Tauri". It reached Tauri by taste: it argued for a
+*property* — a window that loads `127.0.0.1` and supervises the Node CLI as a
+sidecar — and then named one product that has it. Several toolchains have it.
+All three candidates were prototyped and measured
+(`docs/desktop-shell-decision.md`); this is the outcome.
 
-The way through is that Tauri can load a URL. The portal is already a plain
-`node:http` server rendering a single page with no build step, so:
+The property is right and unchanged:
 
-- the Tauri window points at `127.0.0.1` and renders the existing portal;
+- the window points at `127.0.0.1` and renders the existing portal;
 - the Node CLI runs as a **sidecar** process the app starts and stops;
 - there is exactly one UI implementation, and the browser portal keeps working.
 
-Open question, deliberately not answered yet: whether the sidecar ships a
-bundled Node runtime or requires Node to be installed. That decides the
-installer size and the "non-engineer can install it" claim, and it should be
-decided with numbers rather than taste.
+**What delivers it is a tray helper, not a framework.** A 151-line Windows tray
+application starts the CLI, reads the tokenized URL from its stdout, opens the
+browser, and stops the sidecar on quit. Measured against Tauri and Wails
+prototypes doing the same job with the same real portal:
+
+- **cold start is about 1.6 s faster** — roughly 0.6 s against 2.1–2.2 s end to
+  end, including the portal's own boot — because the user's browser has already
+  paid the Chromium start-up and a webview has not;
+- **memory depends on whether a browser is already open, and a native shell
+  never gets the cheap case.** Reusing an open browser costs 185.0 MB against
+  437.8 MB for a Tauri window; starting one costs 862.8 MB. WebView2 *is*
+  Chromium — a native shell starts a second one that shares nothing with the
+  user's, and pays that whether or not a browser is running. Two caveats the
+  decision document carries and this summary must not drop: it rests on the
+  assumption that users typically keep a browser open, and both browser figures
+  are for dedicated Edge profiles that were neither clean nor in the same state
+  as each other;
+- **the installer differs by 3.32 MiB** between all three shells;
+- **the toolchain differs by 3 GB**: Rust costs ~3.08 GB and a 149-second clean
+  build, Go ~823 MB and 18.6 s, the tray helper 13.6 KB and under a second with
+  a compiler Windows already ships.
+
+The no-bundler rule survives better this way than it would have under Tauri,
+which also downloads 129 MB of NSIS and WiX on first build.
+
+**If a native shell later becomes necessary it is Tauri**, not Wails: Tauri
+loads an external URL as a first-class window target, produces a signed-update
+primitive and both installer formats with nothing extra installed, while Wails
+has no external-URL option and its natural design — proxying the portal through
+its own asset server — is refused by the portal's own cross-origin check.
+`docs/desktop-shell-decision.md` §7 names the four conditions that would reverse
+this, the two of which should be tested during P9-1 and P9-3.
+
+**The open question is now answered: the runtime is bundled.** Measured, the
+same application payload with and without `node.exe`: **+20.9 MiB of download
+and +81.2 MiB installed**, uniformly, whichever shell is used — 4.61 MiB against
+25.5 MiB for the tray helper. That buys two things. "A non-engineer can install
+it" stops being false, because the first instruction is no longer "install Node
+22". And `better-sqlite3` ships a native binary pinned to a Node ABI, so
+bundling pins it to the runtime we tested rather than to whatever is on the
+user's `PATH` — an ABI mismatch is exactly the failure a non-engineer cannot
+diagnose.
 
 ## 4. Why a desktop app and not a web service
 
@@ -413,7 +454,7 @@ The vision does not change what to build next; it changes what to build after.
    tailoring~~ — shipped, including the posting-to-archetype classifier, which
    is deterministic and makes no model calls.
 3. Add form answering (§8) to Phase 5, where application records live.
-4. Then the Tauri app shell (Phase 9), pointing at the existing portal with the
+4. Then the app shell (Phase 9), pointing at the existing portal with the
    CLI as a sidecar.
 5. Application assistance and tool-using agent mode last (Phase 10b).
 
@@ -426,9 +467,11 @@ the most dangerous one, and the onboarding contradiction below dissolved.
 
 §2 previously said both prerequisites — a terminal and an LLM subscription — had
 to become optional. The agent CLI removes the subscription-and-key requirement
-now, and the Tauri shell removes the terminal at Phase 9. What remains is that
-the user must already own a coding agent, which is a narrower claim than "no
-prerequisites" and should be stated honestly in the product's own description.
+now, and the Phase 9 shell removes the terminal. A third prerequisite was
+hiding behind those two — an installed Node runtime — and §3.1 now removes it
+by bundling. What remains is that the user must already own a coding agent,
+which is a narrower claim than "no prerequisites" and should be stated honestly
+in the product's own description.
 
 One dependency correction stands:
 

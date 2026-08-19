@@ -183,9 +183,29 @@ session):
   deadlock, so treat a review as a negotiation, not a countdown.`
 - for the evaluator only: `The worker's report will follow in a later message.
   Review the change as the diff from <baseline sha>, which was a clean tree.
-  Until the report arrives, read the task and the standards documents and form
-  your own expectation of what a correct change looks like. Do not modify the
-  working tree; it is checked byte for byte.`
+  Before it arrives, do the pre-read your agent file requires and reply with your
+  independent expectation — not an acknowledgement. Read the task, the standards
+  documents and any code you consult at <baseline sha> (git show <baseline
+  sha>:<path>), not from the working tree, which the worker is changing while you
+  read. Do not modify the working tree; it is checked byte for byte.`
+
+### The evaluator's pre-read is not optional
+
+The evaluator's first reply should be its independent expectation of a correct
+change, per the "Your first output is not a verdict" section of its agent file.
+Check that it is. On our first real run the evaluator came back in 46 seconds
+with a single line — "Ready for the worker's report" — and only did the work when
+asked again; the second attempt produced a committed prior, a list of claims it
+intended to verify itself, and the observation that the portal's URL carries a
+token, which set the bar for what counted as a real prototype. None of that would
+have existed had the acknowledgement been accepted.
+
+So if the first reply is an acknowledgement, send it back once, before the worker
+reports, naming the specific items the agent file asks for. This costs one cheap
+model cycle while the worker is still working, and it buys the independence the
+second model is there to provide. Do not relay the pre-read to the worker — it is
+for the evaluator's own use, and feeding it forward would contaminate exactly
+what it exists to protect.
 
 Then end your turn and wait for the worker's completion notification. Do not
 poll.
@@ -294,20 +314,47 @@ block; they become follow-ups and the work continues past them.
 So a `REVISE` is not a stop. It is the next round of a negotiation, and the worker
 keeps working through it.
 
-What stops the loop is **not moving**. After each round, count the open blockers:
+What stops the loop is **not moving**. After each round, ask one question: **did
+at least one blocker close?** A blocker closes by being fixed, withdrawn or
+settled.
 
 | Round outcome | Meaning | Action |
 |---|---|---|
-| Open blockers went down | Converging | Continue |
-| Open blockers unchanged | Stalled round | Continue, and increment the stall count |
+| Round entered with no open blockers | Initial finding round — not eligible | Continue; the stall count stays where it is |
+| One or more blockers closed | Converging | Continue, and reset the stall count to zero |
+| No blocker closed | Stalled round | Continue, and increment the stall count |
 | Three consecutive stalled rounds | Deadlock — a real disagreement | Escalate |
 | 8 worker attempts on one task | Runaway | Stop regardless, and say so |
 
+**Only rounds that begin with an open blocker can stall.** The first review
+enters with none — the worker has not been told anything yet — so it is
+arithmetically incapable of closing one. Counting it would charge the task a
+deadlock attempt for the crime of receiving its first `REVISE`, and would leave
+a task escalating after just two real worker responses. The stall counter
+measures whether the worker and reviewer can resolve a disagreement, and there
+is no disagreement to resolve until one has been stated.
+
+**Count closures, not the net number of open blockers.** These come apart the
+moment a fix introduces a new claim: a round that closes two blockers and raises
+two fresh ones leaves the count unchanged at two, and a net rule would call that
+a stall. It is the opposite of a stall — two disagreements were resolved and the
+reviewer found new material in work that did not exist before. Three such rounds
+would escalate a loop that is doing exactly what it was built to do. So the
+question is never "is the number smaller", it is "did anything get resolved".
+
+New blockers raised in a round neither reset nor inflate the stall count. Only
+closures reset it.
+
 Track `attempt` (worker cycles) and `stalls` (consecutive rounds that closed
-nothing) in the plan file, and report both at the end. Three is the number that
-matters, but it now counts *stuck* rounds rather than rounds — a loop making
-steady progress over five rounds is working exactly as intended, and cutting it
-off at three would have thrown away work that was nearly finished.
+nothing) in the plan file, and report both at the end, along with the total
+number of distinct blockers raised — that last figure is what makes a three-round
+run legible later, because `stalls: 0` alone does not distinguish a clean first
+pass from a hard-fought four-blocker negotiation.
+
+Watch for one thing the counter cannot see: if the same *class* of defect appears
+in three successive rounds — not the same blocker re-argued, but the same kind of
+mistake made again in new material — the loop is converging on paper and the work
+is not improving. Say so to the user rather than riding the counter down.
 
 The runaway ceiling exists because "converging" can be gamed by an agent that
 closes one trivial blocker per round forever. If you hit it, that is what

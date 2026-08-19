@@ -138,14 +138,32 @@ not survive scrutiny.
 
 ## Attempt limits
 
-The loop continues while it is converging and stops when it is stuck. Each round
-must reduce the number of open blockers — by fixing one, by the reviewer
-withdrawing one, or by the two of you settling one. Three consecutive rounds that
-move nothing means the disagreement is real, and a human is asked to settle it.
+The loop continues while it is converging and stops when it is stuck. A round
+counts as progress if **at least one blocker closes** — by your fixing it, by the
+reviewer withdrawing it, or by the two of you settling it. Three consecutive
+rounds in which nothing closes means the disagreement is real, and a human is
+asked to settle it.
+
+The first review is not one of those rounds. It arrives with no open blockers, so
+it cannot close one, and it never counts against you — receiving findings is not
+failing to resolve them. The count begins with your first response to them.
+
+Note what that does *not* say. It does not require the total number of open
+blockers to fall. If you close two and your fix exposes two new ones, the round
+was progress, not a stall — new findings in new material are the loop working,
+not the loop failing. So do not narrow a fix, or leave a claim vague, in the hope
+of not attracting a fresh finding. A fix that introduces a new claim which is
+then caught is a better outcome than a fix that hides one.
 
 So you are not on a countdown, and you should not treat a review round as a
 strike against you. But do not run in place either: a response that neither fixes
 nor settles nor contests with evidence is what burns the loop down.
+
+One thing worth watching in yourself: if the reviewer catches the same *kind* of
+error in successive rounds — overstated evidence, say, or an untested assertion —
+fixing each instance is not enough. Say plainly that it is a pattern and what you
+have changed about your approach, because a loop that closes three instances of
+one habit has not addressed the habit.
 
 If you reach the point of escalation, do not capitulate to close it out and do
 not dig in silently. State the disagreement plainly, give your strongest

@@ -9,6 +9,39 @@ and, more usefully, what it means when it *doesn't*.
 
 ---
 
+## Round 0 — the evaluator's pre-read
+
+The two agents are spawned together, so the evaluator has forty minutes before
+there is anything to review. That time is not idle: its required first output is
+its own expectation, sent before the report exists.
+
+```text
+I read the task, agent.md, architecture.md §33 and docs/vision.md §3, and enough
+of src/portal to know what a shell would be wrapping.
+
+My own answer: the shell should own no UI. If the diff contains portal markup,
+that is the defect regardless of what else is right.
+
+What would discriminate: whether the sidecar is spawned with an argument vector
+or a command string; whether the window survives a sidecar that never becomes
+ready; whether closing the window leaves an orphan. Installer size is nearly
+noise at this stage.
+
+What I will verify myself: the spawn call, the allowlist, and the close path. I
+will take the build output on trust unless a number looks wrong.
+
+Where I expect an honest failure: code signing. There is no certificate on this
+machine, and saying so is not a shortfall.
+```
+
+Note what this buys. When the report later argues the change is correct, the
+evaluator already holds a view formed without that argument in front of it — and
+it has committed, in writing, to checking the spawn call itself. An evaluator
+that replies "ready" to this prompt has given up both, and the orchestrator sends
+it back.
+
+---
+
 ## Round 1
 
 Orchestrator reserves the task, records baseline `a1b2c3d`, and spawns both
@@ -241,11 +274,55 @@ threat model is not settled, it is buried.
 
 ---
 
+## Counting rounds: the case that looks like a stall and is not
+
+The escalation above turns on three rounds that closed nothing. It is worth being
+precise about what "nothing" means, because the obvious reading is wrong and the
+first real run of this loop hit it immediately.
+
+Suppose round 2 goes like this: the evaluator confirms both open blockers are
+fixed, and raises two new ones about claims the *fixes themselves* introduced —
+a number the new method does not support, a test the new prose oversells.
+
+```text
+Open blockers entering round 2:  2   [F1] [F2]
+Closed during round 2:           2   [F1] fixed, [F2] fixed
+Raised during round 2:           2   [F3] [F4]
+Open blockers leaving round 2:   2
+```
+
+The count did not move, so a rule phrased as "open blockers unchanged" records a
+stall. Three rounds like that and a loop resolving two disagreements per round
+gets escalated to a human as deadlocked.
+
+It is the opposite of a deadlock. Nothing was re-argued; two findings were
+settled and the reviewer found real defects in material that did not exist an
+hour earlier. That is the second model doing precisely what it is for — and in
+that run, [F3] and [F4] were both false empirical claims caught by reading the
+spike's scripts rather than the prose asserting them.
+
+So the rule counts **closures**: a round is a stall only when nothing was fixed,
+withdrawn or settled, and only rounds that *enter* with an open blocker are
+eligible at all. Round 1 has nothing to close, so it is never a stall — which is
+why the escalation above reaches three only after rounds 2, 3 and 4. New findings
+neither reset nor inflate the counter. Say which reading you applied when you
+report a round, so the human can see the loop's state rather than infer it from a
+number.
+
+The counter still cannot see one thing — the same *class* of defect recurring in
+new material round after round. Closures keep resetting the count while the work
+does not actually improve. No arithmetic catches that; the evaluator is asked to
+name it as a pattern, and the orchestrator to pass it on unsoftened.
+
+---
+
 ## What to take from this
 
 - A `REVISE` is a round, not a stop. The worker keeps working through it.
 - Only `blocker` findings hold a task open. `major` and `minor` become
   follow-ups and never delay a merge.
+- Progress is **closures, not the net count**. A round that closes two and raises
+  two is converging, not stalling.
 - Most real disagreements are about **price, not existence** — F1 was never
   "is this a bug", it was "how much fixing does it deserve here". That is what
   the settlement path is for, and it is the path most rounds should take.

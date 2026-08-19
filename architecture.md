@@ -1838,15 +1838,20 @@ Acceptance:
 
 ---
 
-## Phase 9 — Desktop Application Shell (Tauri)
+## Phase 9 — Desktop Application Shell
 
 The app is a shell around the CLI, not a rewrite of it (`docs/vision.md` §3).
-Tauri loads the existing portal over `127.0.0.1` and runs the Node CLI as a
+The shell loads the existing portal over `127.0.0.1` and runs the Node CLI as a
 sidecar, so the no-bundler constraint holds and there is one UI implementation.
+
+The shell is a Windows tray helper rendering in the user's own browser, not a
+native window. Tauri, Wails and no-shell were prototyped against the real portal
+and measured; `docs/desktop-shell-decision.md` records the numbers, names Tauri
+as the fallback, and lists the conditions that would reverse the choice.
 
 Build:
 
-- Tauri shell pointing at the portal, with the CLI as a managed sidecar
+- tray helper pointing at the portal, with the CLI as a managed sidecar
 - engine selection as a first-run step (agent CLI, local model, or API key)
 - schedule management with a visible next-run time
 - native toast notifications
@@ -1862,7 +1867,18 @@ Acceptance:
 - a run is fully reconstructable from the local database after the app closes
 - Phase 7 (local RAG) is optional at runtime, never a hard dependency
 
-Open: whether the sidecar bundles a Node runtime or requires an installed one.
+Open, on the runtime question: nothing. The sidecar bundles its own Node runtime
+— measured at +20.9 MiB of installer and +81.2 MiB installed, which also pins the
+`better-sqlite3` native ABI to the runtime we ship
+(`docs/desktop-shell-decision.md` §3.4). The scheduled task line must therefore
+resolve `nodePath` to the bundled `node.exe`, not to whatever is on `PATH`.
+
+Phase 9 as a whole still has open questions, and they are listed in
+`docs/desktop-shell-decision.md` §8 rather than duplicated here — toast
+activation under the app's own identity, an end-to-end signed update, keeping the
+portal's bearer token out of browser history, and a real `better-sqlite3` ABI
+mismatch. The first of those is a reversal condition for the shell decision
+itself.
 
 ---
 
