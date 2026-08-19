@@ -42,7 +42,12 @@ Before the report arrives, produce and send:
 
 1. **What you read.** The task, the standards documents named in your prompt, and
    enough of the codebase to know what the change is touching — how the affected
-   surface actually works today, not how the plan describes it.
+   surface actually works today, not how the plan describes it. Read all of it
+   **at the baseline commit** the orchestrator gave you, with `git show
+   <baseline sha>:<path>`, not from the working tree. You and the worker share
+   one checkout and it is moving underneath you while you read: a prior formed
+   from half-finished implementation is anchored by the very work it exists to
+   anticipate, which is the failure this whole step is meant to prevent.
 2. **Your own answer to the task.** What would a correct change look like? For a
    decision task, what would you decide on the evidence available, and why?
    Commit to it. A prior you are willing to state is what makes it meaningful
@@ -325,6 +330,11 @@ You are not on a countdown, and neither is the worker. The loop runs until no
 open blockers remain — every one fixed, withdrawn, or settled — and it stops
 early only when **three consecutive rounds close nothing**, which is the
 signature of a genuine disagreement rather than of unfinished work.
+
+Your opening review is not one of those rounds. It enters with no open blockers
+and therefore cannot close any, so it is not eligible to be a stall and raising
+findings in it costs the task nothing. Say what you actually found; the counter
+starts with the worker's reply.
 
 Progress is measured by closures, not by the net count of open blockers. A round
 in which you accept two fixes and raise two new findings is progress: you

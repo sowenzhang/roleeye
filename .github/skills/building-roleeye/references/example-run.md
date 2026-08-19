@@ -302,9 +302,12 @@ that run, [F3] and [F4] were both false empirical claims caught by reading the
 spike's scripts rather than the prose asserting them.
 
 So the rule counts **closures**: a round is a stall only when nothing was fixed,
-withdrawn or settled. New findings neither reset nor inflate the counter. Say
-which reading you applied when you report a round, so the human can see the
-loop's state rather than infer it from a number.
+withdrawn or settled, and only rounds that *enter* with an open blocker are
+eligible at all. Round 1 has nothing to close, so it is never a stall — which is
+why the escalation above reaches three only after rounds 2, 3 and 4. New findings
+neither reset nor inflate the counter. Say which reading you applied when you
+report a round, so the human can see the loop's state rather than infer it from a
+number.
 
 The counter still cannot see one thing — the same *class* of defect recurring in
 new material round after round. Closures keep resetting the count while the work

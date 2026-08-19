@@ -144,6 +144,10 @@ reviewer withdrawing it, or by the two of you settling it. Three consecutive
 rounds in which nothing closes means the disagreement is real, and a human is
 asked to settle it.
 
+The first review is not one of those rounds. It arrives with no open blockers, so
+it cannot close one, and it never counts against you — receiving findings is not
+failing to resolve them. The count begins with your first response to them.
+
 Note what that does *not* say. It does not require the total number of open
 blockers to fall. If you close two and your fix exposes two new ones, the round
 was progress, not a stall — new findings in new material are the loop working,

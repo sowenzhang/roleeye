@@ -184,8 +184,10 @@ session):
 - for the evaluator only: `The worker's report will follow in a later message.
   Review the change as the diff from <baseline sha>, which was a clean tree.
   Before it arrives, do the pre-read your agent file requires and reply with your
-  independent expectation — not an acknowledgement. Do not modify the working
-  tree; it is checked byte for byte.`
+  independent expectation — not an acknowledgement. Read the task, the standards
+  documents and any code you consult at <baseline sha> (git show <baseline
+  sha>:<path>), not from the working tree, which the worker is changing while you
+  read. Do not modify the working tree; it is checked byte for byte.`
 
 ### The evaluator's pre-read is not optional
 
@@ -318,10 +320,19 @@ settled.
 
 | Round outcome | Meaning | Action |
 |---|---|---|
+| Round entered with no open blockers | Initial finding round — not eligible | Continue; the stall count stays where it is |
 | One or more blockers closed | Converging | Continue, and reset the stall count to zero |
 | No blocker closed | Stalled round | Continue, and increment the stall count |
 | Three consecutive stalled rounds | Deadlock — a real disagreement | Escalate |
 | 8 worker attempts on one task | Runaway | Stop regardless, and say so |
+
+**Only rounds that begin with an open blocker can stall.** The first review
+enters with none — the worker has not been told anything yet — so it is
+arithmetically incapable of closing one. Counting it would charge the task a
+deadlock attempt for the crime of receiving its first `REVISE`, and would leave
+a task escalating after just two real worker responses. The stall counter
+measures whether the worker and reviewer can resolve a disagreement, and there
+is no disagreement to resolve until one has been stated.
 
 **Count closures, not the net number of open blockers.** These come apart the
 moment a fix introduces a new claim: a round that closes two blockers and raises

@@ -24,7 +24,9 @@ selectable.
   or back to `todo`. `attempt` counts worker cycles and `stalls` counts
   consecutive review rounds in which **no blocker closed** — closures, not the
   net number of open blockers, because a round that closes two and raises two is
-  progress rather than a stall; both are updated as the loop
+  progress rather than a stall. Only rounds that *enter* with an open blocker are
+  eligible: the first review has nothing to close and never counts as a stall.
+  Both are updated as the loop
   runs, so a task that has already argued its way to a deadlock cannot quietly
   start over at zero.
 - `blocked` means the loop deadlocked — three consecutive rounds closing nothing
@@ -153,8 +155,10 @@ the Phase 5 form-answering work from `docs/vision.md` §8.
 
 ```text
 ## SETTLEMENT RECORD — P9-0 Decide the desktop shell: Tauri, Wails, or no native shell
-Verdict: ACCEPT   Rounds: 3   Stalls: 0
+Verdict: ACCEPT   Rounds: 6   Stalls: 0   Blockers raised: 10, all closed
 Worker: Claude Opus 5      Evaluator: gpt-5.6-sol
+Rounds 1-3 closed the task. Rounds 4-6 were a further loop on PR #8 review
+findings, and are recorded below the original settlement.
 
 Built
 - `docs/desktop-shell-decision.md` (37,738 B): three candidates — Tauri, Wails,
@@ -210,9 +214,9 @@ Follow-ups created
 - None. The evaluator raised no non-blocking findings in any round.
 
 Not done, deliberately
-- The tray helper itself — P9-1. Prototypes are throwaway and remain outside the
-  repository in `%TEMP%\roleeye-p9-0-spike`; `src/` and `tests/` were never
-  touched in any round.
+- The tray helper itself — P9-1. Prototypes were throwaway, built outside the
+  repository, and deleted on close (see the privacy note in the addendum);
+  `src/` and `tests/` were never touched in any round.
 - Moving `data/`, `config/`, `profile/` and `artifacts/` out of any install
   layout — recorded as a constraint inherited by P9-1 and G-4, and logged in the
   decisions log, after an uninstall was observed deleting the career database.
@@ -222,6 +226,78 @@ Not done, deliberately
   unverified rather than filled in with a vendor claim. It is reversal
   condition 2 and the load-bearing unknown for P9-3.
 - An end-to-end signed update, and a real ABI-mismatch test — §8, scoped to G-4.
+
+## SETTLEMENT RECORD (addendum) — P9-0, PR #8 review rounds 4-6
+Verdict: ACCEPT   Rounds: 4-6   Stalls: 0   Blockers raised: 6, all fixed
+Trigger: 16 comments from GitHub's automated reviewer on PR #8. Twelve were the
+orchestrator's (protocol files, plan bookkeeping); four went to the loop.
+
+What changed
+- No claim about the shell choice changed. Every finding in these three rounds
+  was about the accuracy of a claim around a conclusion that never moved.
+- [R1] the 812.8 MB cold figure was candidate 3b (`msedge --app`, fresh profile)
+  presented as 3c's cost. Measured the selected path: **862.8 MB**. The proxy was
+  50 MB low.
+- [R2] 185.0 MB was called an "upper bound"; the reasoning counted only the term
+  favouring the recommendation. Now presented as what it is, a single
+  controlled-profile measurement, with uncertainty named in both directions.
+- [R3] the claim that a native shell fixes token-in-history was false. The Tauri
+  prototype's own WebView2 store held four `127.0.0.1` rows carrying a real
+  48-hex session token after the app closed. A native shell relocates the
+  problem into an unencrypted app-owned file rather than removing it. Now G-10.
+- [R4] the replacement caveat described the measurement profiles as having no
+  extensions, policy or history; they had four extensions, fourteen policies and
+  5,764 history rows, arrived by **Edge profile sync**. A dedicated
+  `--user-data-dir` is not a clean profile on a signed-in machine. Consequence:
+  185.0 MB and 862.8 MB are not a controlled pair. The "more likely low than
+  high" inference was deleted, not reworded — its premise was false.
+- [R5] the measured 279 ms stub cost (documented as "roughly 40 ms", wrong by
+  7×) invalidated the 5× cold-start headline: end-to-end it is 3.86×. The ratio
+  was **deleted from all three documents** rather than footnoted, and the
+  argument now leads with the invariant — about **1.6 s** of extra wait per
+  launch — which does not move with how the sidecar's boot is counted.
+- [R6] the "exhaustive" sweep was not: a wrapped "130 lines" survived a
+  line-based grep, and 2026-07-16 was the minimum `urls.last_visit_time`, not
+  the earliest visit (2026-07-02).
+- A worker-run sweep between [R4] and [R5] found five further instances
+  unprompted, including the stub cost above.
+
+The pattern, recorded because it outlived every individual fix
+- Eleven corrections across six rounds were **one defect class**: a claim
+  describing what a measurement was designed to show rather than what it
+  recorded. It recurred inside the round whose stated purpose was to eliminate
+  it. The stall counter read 0 throughout, because every round closed blockers —
+  no arithmetic in the protocol can see this, which is why both agent files now
+  ask for a recurring class to be named as a pattern.
+- The evaluator's own diagnosis of its miss: it verified arithmetic, artifact
+  sizes and whether measurements existed, but never built a claim-to-artifact
+  map. That map, applied in rounds 5-6, is what found the rest.
+
+Residual risk accepted
+- End-to-end native-shell timings are **derived** (measured shell-only plus a
+  measured 178 ms constant), not stopwatched. The additive model is shown, and
+  holds because each shell blocks on the sidecar's URL before creating its
+  window. Judged acceptable rather than worth a seventh round.
+- Memory medians and the stub-boot median cannot be recomputed from disk; the
+  harnesses printed to stdout. Every median is published with its range.
+- The warm/cold memory pair is uncontrolled and will stay so — settling it means
+  closing the user's live browser session, which was refused in every round.
+
+Privacy incident, disclosed
+- The spike's `edge-warm` profile pulled **5,764 rows / 13,765 visits of the
+  user's real browsing history** into `%TEMP%` via Edge sync, because a fresh
+  `--user-data-dir` inherits the signed-in account. Nothing left the machine.
+  The whole spike directory (2.8 GB) was deleted once both agents confirmed they
+  no longer needed it, along with `%LOCALAPPDATA%\dev.roleeye.spike.tauri`, whose
+  WebView2 history held four portal session tokens. Lesson for any future spike:
+  measure browsers with `--guest` or a signed-out profile.
+
+Follow-ups created
+- **G-10** — keep the portal's bearer token out of browser history (backlog, by
+  the user's decision: ship the shell first).
+- **P9-1** gained one acceptance criterion: user data must resolve outside the
+  install directory, verified across an install/run/uninstall cycle.
+- **G-4** extended with both inherited constraints.
 ```
 
 ### P9-1 — Desktop shell over the existing portal
@@ -251,6 +327,11 @@ Not done, deliberately
         surfaced rather than hung on; a port collision is handled; a sidecar
         crash is reported to the user; closing the window leaves no orphan
         process
+  - [ ] `data/`, `config/`, `profile/` and `artifacts/` resolve **outside** the
+        install directory. Verified by installing the built artefact, running it
+        until the database exists, uninstalling, and confirming the database is
+        still present. (from P9-0 review — an uninstall was observed deleting the
+        career database, `docs/desktop-shell-decision.md` §5.1; invariant 5)
   - [ ] `npm run build`, `npm run typecheck` and `npm test` pass unchanged
 
 ### P9-2 — First-run engine selection
@@ -355,7 +436,15 @@ From `docs/vision.md` §11. Each is a real hole; none is started. Promote to
 ### G-4 — Installer and update security
 - status: deferred
 - depends: P9-1
-- why: code signing, SmartScreen reputation, update trust and rollback.
+- why: code signing, SmartScreen reputation, update trust and rollback. P9-0
+  measured two constraints this task inherits rather than discovers
+  (`docs/desktop-shell-decision.md` §5.1): an uninstall was observed **deleting
+  the career database**, because the spike staged `data/` inside the install
+  directory — invariant 5 destroyed by an ordinary uninstall, and by any updater
+  that clears the directory before writing. And `buildInstallCommand` pins two
+  absolute paths into the scheduled task, so a versioned install directory
+  silently breaks the scheduled run. Neither is shell-specific. An end-to-end
+  signed update remains unmeasured (§8).
 
 ### G-5 — Discovery recall
 - status: deferred
@@ -390,6 +479,21 @@ From `docs/vision.md` §11. Each is a real hole; none is started. Promote to
 - open: whether the server is part of the Node CLI (likely) or of the shell; and
   whether read-only SQL over career history is safe to expose to an agent whose
   context also holds attacker-authored posting text.
+
+### G-10 — Keep the portal's bearer token out of browser history
+- status: deferred
+- depends: P9-1
+- why: P9-0 chose to render the portal in the user's own browser, and named this
+  as the security cost of that choice (`docs/desktop-shell-decision.md` §7). The
+  portal requires a random per-start token, which today travels in the URL the
+  helper opens, so it lands in the default profile's history and in anything that
+  syncs it. A native shell would move the problem rather than remove it —
+  WebView2 persists navigated query strings in its own user-data folder too — so
+  a one-time local redirect that sets the credential and replaces the URL is
+  wanted under either shell. Deferred rather than folded into P9-1 by decision on
+  2026-08-19: ship the shell first. Not selectable until promoted with acceptance
+  criteria; the observable is that the token does not appear in the browser
+  profile's history after a normal launch.
 
 ---
 

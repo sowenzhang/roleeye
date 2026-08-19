@@ -1867,11 +1867,18 @@ Acceptance:
 - a run is fully reconstructable from the local database after the app closes
 - Phase 7 (local RAG) is optional at runtime, never a hard dependency
 
-Open: nothing. The sidecar bundles its own Node runtime — measured at +20.9 MiB
-of installer and +81.2 MiB installed, which also pins the `better-sqlite3`
-native ABI to the runtime we ship (`docs/desktop-shell-decision.md` §3.4). The
-scheduled task line must therefore resolve `nodePath` to the bundled
-`node.exe`, not to whatever is on `PATH`.
+Open, on the runtime question: nothing. The sidecar bundles its own Node runtime
+— measured at +20.9 MiB of installer and +81.2 MiB installed, which also pins the
+`better-sqlite3` native ABI to the runtime we ship
+(`docs/desktop-shell-decision.md` §3.4). The scheduled task line must therefore
+resolve `nodePath` to the bundled `node.exe`, not to whatever is on `PATH`.
+
+Phase 9 as a whole still has open questions, and they are listed in
+`docs/desktop-shell-decision.md` §8 rather than duplicated here — toast
+activation under the app's own identity, an end-to-end signed update, keeping the
+portal's bearer token out of browser history, and a real `better-sqlite3` ABI
+mismatch. The first of those is a reversal condition for the shell decision
+itself.
 
 ---
 

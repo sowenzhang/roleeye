@@ -128,6 +128,12 @@ The loop is three parts. Two are generic; one is not.
   finding. Three such rounds would escalate a healthy negotiation. Define a
   stalled round as one in which **nothing closed**, and let new findings neither
   reset nor inflate the counter.
+- **Counting the opening review as a stall.** The trap immediately underneath
+  that fix, and a reviewer caught it in ours before it ever ran: "nothing closed"
+  also describes round 1, which enters with no blockers and cannot possibly close
+  one. Left alone, every task that receives an initial `REVISE` starts one
+  deadlock attempt down and escalates after two real worker responses. Make only
+  rounds that *enter* with an open blocker eligible to stall.
 - **No independent expectation before the report.** If the reviewer's first act
   is to read the author's account of why the work is correct, it is grading a
   justification, not the work. Spawn it with the worker and require a committed
