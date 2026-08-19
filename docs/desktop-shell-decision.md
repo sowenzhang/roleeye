@@ -54,9 +54,12 @@ Core Ultra 7 165H, 22 logical CPUs, 31.5 GB RAM. Node v22.16.0. WebView2
 Runtime 151.0.4129.93.
 
 **Toolchains.** rustc/cargo 1.94.1 (already installed, not by this spike);
-`tauri` crate 2.11.5 via `@tauri-apps/cli` v2 from npm; Go 1.26.6 and Wails CLI
-v2.15.0 (both installed for this spike); `csc.exe` from
+`tauri` crate 2.11.5, built by `tauri-cli` 2.11.4 from npm; Go 1.26.6 and Wails
+CLI v2.15.0 (both installed for this spike); `csc.exe` from
 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319`, which ships with Windows.
+Two WebView2 runtimes are present on this machine, 151.0.4129.86 and
+151.0.4129.93; the prototypes load .93, checked by reading the running webview
+process's image path.
 
 **Cold start** is wall-clock milliseconds from the moment the shell process is
 launched to the moment the rendered window issues its **first HTTP GET** against
@@ -117,12 +120,51 @@ separately.
   great deal, and none of these figures corrects for it. This inflates every
   multi-process candidate — Tauri's six webview processes as much as Edge's
   eleven — so it distorts the absolute numbers more than the comparison.
-- The warm-browser case uses a **controlled** Edge instance on a dedicated
-  profile with one blank tab. A real browser with thirty tabs open has more
-  warm infrastructure to share and would plausibly show a *smaller* marginal
-  cost, so 185.0 MB should be read as an upper bound for the warm case.
+- **The two browser figures were measured on profiles in different states, and
+  neither profile was clean.** This is the corrected description; an earlier
+  draft called both profiles empty, which the artifacts contradict. What the
+  measured profiles actually contained:
+
+  | | Extensions | History rows | Edge policies |
+  | --- | ---: | ---: | ---: |
+  | `edge-warm` (the 185.0 MB warm case) | 4 | **5,764 urls / 13,765 visits** | 14 |
+  | `edge-coldtab` (the 862.8 MB cold case) | 4 | 0 | 14 |
+  | `edge-app2` (the 812.8 MB 3b case) | 4 | 0 | 14 |
+
+  The 14 policies are machine-wide under
+  `HKLM\SOFTWARE\Policies\Microsoft\Edge` and apply to dedicated profiles too.
+  The earliest row in the warm profile's `visits` table is **2026-07-02**, six
+  weeks before this spike ran, so that history arrived by **profile sync from
+  the signed-in account** rather than from the measurement. (An earlier draft
+  gave 2026-07-16, which is `MIN(urls.last_visit_time)` — a different
+  measurement, because a `urls` row records only its most recent visit.)
+
+  Two consequences, both against the tidiness of this document. The warm and
+  cold numbers are **not** a controlled comparison of one configuration under
+  two conditions — the warm profile carried a month of synced history and the
+  cold ones carried none. And no directional inference about how a real profile
+  would differ is supported; an earlier draft argued 862.8 MB was "more likely
+  low than high" on the premise that the profile had no additive terms, and that
+  premise was false. The claim is withdrawn rather than reworded.
+- Measuring the *user's actual default profile* cold would require closing a
+  running browser session, which this spike would not do to the machine it ran
+  on. That is why the cold figure uses a dedicated profile.
 - Time-to-first-paint was not measured at all.
 - **Nothing here was measured on macOS or Linux.** See §8.
+
+### Re-checking these numbers
+
+Claims in this document drifted from their artifacts more than once while it was
+being reviewed, so the surviving evidence is named rather than left implicit.
+Under `%TEMP%\roleeye-p9-0-spike`: `results\*.tsv` holds the per-run cold-start
+samples (`tauri-1.tsv` … `tauri-5.tsv` and so on, one file per run, which
+reproduce the §3.2 medians exactly); `results\setup-*.exe` holds the six
+installers; the three prototypes keep their built binaries; and the Edge
+profiles used for the memory sweeps are `edge-warm`, `edge-coldtab` and
+`edge-app2`. The memory scripts print their samples to stdout and do **not**
+write a transcript, so §3.3's medians cannot be recomputed after the fact — that
+is a defect in the harness, and it is why the per-run ranges are published
+alongside every median.
 
 ---
 
@@ -134,12 +176,21 @@ separately.
 | --- | ---: | ---: | ---: |
 | Tauri | **149.2 s** (cargo: 2m22s) | 264.5 s | 2,998,272 B (2.86 MB) |
 | Wails | **18.6 s** | — (see note) | 11,316,736 B (10.79 MB) |
-| No shell | **0.56 s** | 0.56 s | 7,680 B |
+| No shell | **0.34–0.63 s** | same | 8,192 B |
 
 Wails has no comparable cold-cache number: installing the CLI (87.9 s) and
 `wails init` populated the module cache before the first build of the project
 itself, so a like-for-like figure was not captured. The clean-build number is
 the one that matters and it is measured.
+
+The tray-helper row is the current artifact, re-measured: `Launcher.cs` is 151
+lines and builds to 8,192 bytes in 0.34–0.63 s over three runs. An earlier draft
+carried 7,680 bytes, 0.56 s and "130 lines", which were true of the first
+version and stopped being true once the prototype grew a `tab` open mode and a
+timer hook so the quit path could be exercised without a mouse. Both of those
+exist for measurement, so a shipped helper would be nearer the smaller figure —
+but that is an expectation, not a measurement, and the number above is what is
+on disk.
 
 What each option adds to a contributor's machine, measured after the spike:
 
@@ -147,7 +198,7 @@ What each option adds to a contributor's machine, measured after the spike:
 | --- | ---: |
 | Tauri | rustup toolchains 1,290,533,322 B + cargo home 446,786,918 B + NSIS/WiX cache 129,115,304 B + per-project `target/` 1,218,322,748 B ≈ **3.08 GB** |
 | Wails | Go SDK 235,904,330 B + module cache 404,142,887 B + Wails CLI 35,791,872 B + build cache 147,521,692 B ≈ **823 MB** |
-| No shell | 12,072 B of sources and binary. The compiler is already in Windows. ≈ **0** |
+| No shell | 13,603 B of source and binary. The compiler is already in Windows. ≈ **0** |
 
 Attribution caveat: Rust was already installed on this machine before the spike,
 so the 1.29 GB rustup figure is "what a Rust toolchain occupies here", not "what
@@ -176,13 +227,36 @@ Two costs found only by doing it:
 
 The real `roleeye ui` boots — process start to the tokenized URL on stdout — in
 **457 ms** (median of 5, range 437–475), against an empty scratch database. The
-stub used for timing costs roughly 40 ms, so **add about 420 ms to every row**
-for the real product. The ordering does not change: roughly 0.8 s for a browser
-tab against roughly 2.4 s for either native shell.
+stub costs **279 ms** by the same measurement (median of 5, range 241–322), so
+the correction for the real product is **+178 ms on every row**, not the
+"roughly 40 ms stub, +420 ms" an earlier draft asserted — that figure was
+assumed and never measured, and it was wrong by a factor of seven.
+
+Because the correction is the same constant for every candidate, it preserves
+the *difference* and not the ratio. Against Tauri, a tab in an already-running
+browser saves **1,631 ms** either way. As a ratio that is **5.16×** on the
+shell-only figures in the table above, and **3.86×** end to end — 570 ms against
+2,201 ms — because adding a constant to both sides moves a ratio toward 1. An
+earlier draft asserted the ratio was unchanged by the correction; it is not.
+
+**Convention for the rest of this document:** where the argument is about what a
+user waits for, the end-to-end figures are used — roughly **0.6 s** for a browser
+tab against **2.1–2.2 s** for a native shell (Wails 2,140 ms, Tauri 2,201 ms).
+The shell-only figures appear only in the table above, where the point is to
+isolate the shell from RoleEye's own boot.
 
 The reason is not that webviews are slow. It is that the browser is already
 running and the webview is not, so the native shells pay a Chromium start-up the
 browser has already paid.
+
+Two configuration notes, because §3.3 makes the same distinction and these rows
+must not be read as covering more than they do. The 392 ms row is the **warm**
+case — a tab in the browser that was already running, measured against this
+machine's real default Edge profile rather than the dedicated profiles the
+memory figures use. And there is **no cold-browser row for candidate 3c**: when
+no browser is running, the browser start dominates, and the `--app` row at
+2,047 ms is the closest measured proxy. So the advantage below is a warm-case
+advantage, on the same condition as §3.3.
 
 ### 3.3 Resident memory
 
@@ -193,22 +267,35 @@ includes the Node sidecar.
 | | Median delta | Range | Process set after |
 | --- | ---: | --- | --- |
 | Tray helper + sidecar, **no window at all** | **80.6 MB** | 80.4–81.3 | 2 |
-| **No shell — tab in a browser already open** | **185.0 MB** | 162.7–192.2 | 12 Edge (was 11) |
+| **3c — tab in a browser already open** | **185.0 MB** | 162.7–192.2 | 12 Edge (was 11) |
 | Tauri | 437.8 MB | 435.5–438.8 | 6 webview + node + shell |
 | Wails | 498.3 MB | 495.4–501.2 | 6 webview + node + shell |
-| No shell — `msedge --app`, **no browser already running** | 812.8 MB | 810.4–873.0 | 11 Edge + node + tray |
+| 3b — `msedge --app`, no browser running | 812.8 MB | 810.4–873.0 | 11 Edge + node + tray |
+| **3c — normal tab, no browser running** | **862.8 MB** | 860.4–1,029.4 | 11 Edge + node + tray |
 
-The controlled browser at rest, before RoleEye existed, was 770.3 MB across 11
-processes.
+The browser at rest in the warm case, before RoleEye existed, was 770.3 MB
+across 11 processes.
 
-Decomposed, subtracting the 80.6 MB engine, the *window* costs:
+The last two rows are separated deliberately. An earlier draft used the `--app`
+figure as the cold cost of the *recommended* candidate; it is not, because 3b
+and 3c differ in window mode **and** were run on separately created profiles.
+Measured, the normal tab came out 50 MB above the app window. The two profiles
+have since been checked and were well matched — both hold zero history rows and
+the same four extensions (§2) — so profile state is unlikely to account for the
+gap, and the browser frame is the obvious candidate. But that is an inference
+from two runs that differed in more than one variable, not an isolated
+measurement of what a tab strip costs. What the row is for is that **862.8 MB is
+the selected path**, and 812.8 MB is not.
+
+Decomposed by subtracting the 80.6 MB engine row — arithmetic on the medians
+above, not separately measured — the *window* costs:
 
 | | Cost of rendering the portal |
 | --- | ---: |
 | A tab in a browser already open | **104.4 MB** |
 | Tauri (WebView2) | 357.2 MB |
 | Wails (WebView2) | 417.7 MB |
-| A browser started for the purpose | 732.2 MB |
+| A browser started for the purpose (3c, normal tab) | 782.2 MB |
 
 **WebView2 is Chromium**, and a native shell starts a second one that shares
 nothing with the user's browser. So the answer is conditional, and the condition
@@ -216,16 +303,23 @@ is the one thing this document cannot measure:
 
 - **If the user already has a browser open** — reusing it costs 185.0 MB against
   437.8 MB for a Tauri window. The no-shell option is **2.4× lighter**.
-- **If they do not** — a browser started for the purpose costs 812.8 MB against
-  437.8 MB. The no-shell option is **1.9× heavier**.
+- **If they do not** — a browser started for the purpose costs 862.8 MB against
+  437.8 MB. The no-shell option is **2.0× heavier**.
 
 Most desktop users keep a browser open, which is an assumption and is named here
 as one rather than smuggled in as a fact. What is not an assumption is that a
 native shell never gets the cheap case: Tauri pays 437.8 MB whether or not a
 browser is running, because it cannot use it.
 
+Both browser figures come from **dedicated profiles that were not clean and were
+not in the same state as each other** — the warm one carried 5,764 synced
+history rows, the cold ones none, and all of them carried four extensions and
+this machine's fourteen Edge policies. §2 gives the detail. The practical effect
+is that the two bullets above are two measurements, not one controlled
+comparison, and neither is a bound on a real profile.
+
 The 80.6 MB row is the useful one for later: rendering the portal is between 1.3×
-and 9× the cost of the engine that does the actual work, in every candidate.
+and 10× the cost of the engine that does the actual work, in every candidate.
 
 ### 3.4 Installer size, and the bundled-runtime question
 
@@ -241,7 +335,7 @@ script and the same application payload (`dist/` plus production-only
 | Wails | 8,316,334 B (7.93 MiB) | 30,154,052 B (28.8 MiB) | 44,159,439 B | 129,279,079 B |
 
 For reference, each framework's own bundler, shell only with no application
-payload: Tauri produced NSIS 1,074,612 B **and** MSI 1,548,288 B with nothing
+payload: Tauri produced NSIS 1,074,306 B **and** MSI 1,548,288 B with nothing
 extra installed, and did so by downloading its own copies — `%LOCALAPPDATA%\tauri`
 holds NSIS (7,168,591 B) and WixTools314 (121,946,713 B), so it did not use the
 WiX already on this machine's `PATH`. Wails produced NSIS 6,265,230 B, but only
@@ -249,11 +343,18 @@ after I supplied it a `makensis` — `wails doctor` reports NSIS as an optional
 dependency and it was not present, so the Wails installer was built with the
 NSIS binary **Tauri** downloaded (v3.11).
 
-**The framework choice is 15% of the installer question and the runtime choice
-is 85%.** The spread between the three shells is 3,483,995 B (3.32 MiB).
-Bundling `node.exe` costs **+21,888,474 B (20.9 MiB) compressed** and
-**+85,119,640 B (81.2 MiB) installed** — the installed delta is `node.exe`
-exactly — uniformly, whichever shell is used.
+One caution about precision, found by re-checking these figures against the
+artifacts: two builds of identical Tauri source produced NSIS installers of
+1,074,612 B and 1,074,306 B. The MSI was byte-identical across the same pair.
+Installer sizes are reproducible to about a kilobyte, not to the byte, and the
+figure above is the one currently on disk.
+
+**The runtime decision dominates the framework decision, roughly six to one.**
+The spread between the three shells is 3,483,995 B (3.32 MiB); bundling
+`node.exe` costs **+21,888,474 B (20.9 MiB) compressed** and **+85,119,640 B
+(81.2 MiB) installed** — the installed delta is `node.exe` exactly — uniformly,
+whichever shell is used. As a share of the two together, the shell choice is
+13.7% and the runtime choice 86.3%.
 
 **Answer: bundle the runtime.** 21 MiB of extra download is unremarkable, and
 two things are bought with it. The obvious one is that "a non-engineer can
@@ -353,12 +454,12 @@ that no asset pipeline can sit between the source and what runs.
 | --- | --- | --- |
 | Tauri | `cargo build` plus a silent 129 MB download of NSIS and WiX on first run | Rust toolchain (~3.08 GB with caches on this machine) |
 | Wails | `wails build`, whose default template ships `npm install` + `vite build` and had to be blanked out; and which executes `main()` at build time unless `-skipbindings` is passed | Go SDK + Wails CLI (~823 MB with caches); **plus NSIS separately** to produce an installer |
-| No shell | `csc.exe Launcher.cs` — 0.56 s, one command, no download | Nothing on Windows. **Nothing at all on macOS or Linux, because it does not build there** |
+| No shell | `csc.exe Launcher.cs` — 0.34–0.63 s, one command, no download | Nothing on Windows. **Nothing at all on macOS or Linux, because it does not build there** |
 
 None of the three keeps `tsc` as the only build step. That was never achievable
 once a native binary is shipped, and pretending otherwise would be the taste
 problem this task exists to fix. What differs is the size of the breach: a
-0.56-second in-box compile of one 130-line file is a different kind of violation
+sub-second in-box compile of one 151-line file is a different kind of violation
 from a 149-second Rust build behind a 3 GB toolchain.
 
 Candidate 3a — a Start Menu shortcut to `roleeye ui` — is the only option that
@@ -561,16 +662,23 @@ stops the sidecar on quit. **Bundle the Node runtime** (§3.4).
 
 The numbers that decide it, in order of weight:
 
-1. **A native shell costs 5× the cold start** — 2,023 ms against 392 ms — because
-   the user's browser has already paid the Chromium start-up and the webview has
-   not. Adding the real portal's own 457 ms boot, that is roughly 0.8 s against
-   2.4 s.
+1. **A native shell costs about 1.6 seconds of extra wait at every launch.** End
+   to end, including the portal's own boot, a tab in an already-running browser
+   reaches the page in roughly **0.6 s** against **2.1–2.2 s** for a native
+   shell — a difference of 1,631 ms against Tauri and 1,570 ms against Wails,
+   the figures that do not move with how the sidecar's own boot is counted. The
+   user's browser has already paid the Chromium start-up and the webview has
+   not. This is a warm-case advantage on the same condition as reason 2: with no
+   browser running, one has to start, and the closest measured proxy for that is
+   2,047 ms — no better than a native shell (§3.2).
 2. **On memory a native shell is worse in the common case and better in the
    uncommon one.** Reusing an open browser costs 185.0 MB against Tauri's
-   437.8 MB; starting a browser costs 812.8 MB. A native shell always pays the
+   437.8 MB; starting one costs 862.8 MB. A native shell always pays the
    437.8 MB, because it can never use the browser that is already running. The
    recommendation therefore rests on users typically keeping a browser open,
-   which is stated as an assumption in §3.3, not as a measurement.
+   which is stated as an assumption in §3.3, not as a measurement — and both
+   browser figures come from dedicated profiles that were neither clean nor in
+   the same state as each other (§2).
 3. **The installer difference is noise.** 3.32 MiB between the three shells,
    against 20.9 MiB for the runtime decision that applies to all of them.
 4. **The property is not scarce.** All three prototypes drove the real portal
@@ -579,7 +687,8 @@ The numbers that decide it, in order of weight:
 5. **The supervision gap is ours, not the framework's** (§3.6), and so is most of
    the update path (§5.1), so buying a framework does not buy a fix for either.
 6. **The toolchain cost is real and recurring**: 3.08 GB and 149 s per clean
-   build for Tauri, 823 MB and 18.6 s for Wails, against 12 KB and 0.56 s.
+   build for Tauri, 823 MB and 18.6 s for Wails, against 13.6 KB and under a
+   second.
 
 ### If a native shell becomes necessary, it is Tauri
 
@@ -610,16 +719,26 @@ Stated plainly, because the browser is not free:
   we do not choose.
 - **A session token in browser history.** `roleeye ui` puts the token in the
   query string and a browser records the full URL in history. This is a
-  pre-existing property, not a regression — but a native shell would have fixed
-  it for free, and now it stays open. It is a portal fix (one-time redirect to a
-  cookie), and that fix is cheaper than a framework.
-- **Taskbar identity.** A tab is "Edge", not "RoleEye". `--app` mode restores it
-  and its own taskbar entry — for 812.8 MB and a second browser profile, which
-  is why it is not the default.
+  pre-existing property, not a regression.
+
+  An earlier draft said a native shell would have fixed it for free. **That was
+  wrong, and it was checked rather than reasoned about.** WebView2 keeps its own
+  Chromium history database in the app's user-data folder, and the Tauri
+  prototype's copy —
+  `%LOCALAPPDATA%\dev.roleeye.spike.tauri\EBWebView\Default\History` — contains
+  six `127.0.0.1` rows, four of them carrying a real 48-hex-character portal
+  session token, still on disk after the app had closed. A native shell keeps
+  the token out of the *user's* browser history and writes it to its own
+  instead, in an unencrypted file (see G-2). The one-time-redirect fix in the
+  portal is needed either way, which makes it the cheaper fix in both worlds and
+  removes this from the list of things a framework would have bought.
+- **Taskbar identity.** A tab is "Edge", not "RoleEye". `--app` mode (candidate
+  3b) restores it and gives its own taskbar entry — for 812.8 MB and a second
+  browser profile, which is why it is not the default.
 - **The window's lifetime is not ours.** Closing the browser closes the app's
   window, and the user did not mean to close the app.
 - **The cheap memory case is conditional.** A user who does not keep a browser
-  open pays 812.8 MB where a Tauri window would have cost 437.8 MB (§3.3). They
+  open pays 862.8 MB where a Tauri window would have cost 437.8 MB (§3.3). They
   are the minority on a desktop, but they exist, and this decision is worse for
   them.
 
@@ -652,9 +771,9 @@ Any one of these, and the answer becomes Tauri:
 4. Enterprise browser policy is found to break the portal on target machines.
 
 Conditions 1 and 2 should be tested during P9-1 and P9-3 rather than assumed.
-Nothing in the tray helper is expensive enough to regret if they fire: it is 130
-lines of C#, and the sidecar-supervision work it needs (§3.6) is work Tauri
-would need identically.
+Nothing in the tray helper is expensive enough to regret if they fire: it is 151
+lines of C#, part of that measurement scaffolding, and the sidecar-supervision
+work it needs (§3.6) is work Tauri would need identically.
 
 ---
 
@@ -669,6 +788,12 @@ would need identically.
 - **Whether a registered `AppUserModelID` gives a toast RoleEye's identity**, and
   whether toast activation can reach a browser-based app (§5). The experiment
   could not discriminate.
+- **What either browser figure becomes on a real profile, and what the warm/cold
+  gap really is.** 185.0 MB and 862.8 MB come from dedicated profiles that
+  carried four extensions and fourteen machine Edge policies, and that differed
+  from each other by 5,764 synced history rows (§2). The number of open tabs,
+  the extension set and profile state all move these figures in both directions,
+  none of that was measured, and the two are not a controlled pair.
 - **An end-to-end signed update.** §5.1 establishes the mechanics — per-user
   install without elevation, rename-then-replace, the scheduled-task path
   constraint, and the data-loss constraint — but no candidate was made to

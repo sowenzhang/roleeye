@@ -73,24 +73,27 @@ The property is right and unchanged:
 - the Node CLI runs as a **sidecar** process the app starts and stops;
 - there is exactly one UI implementation, and the browser portal keeps working.
 
-**What delivers it is a tray helper, not a framework.** A ~130-line Windows tray
+**What delivers it is a tray helper, not a framework.** A 151-line Windows tray
 application starts the CLI, reads the tokenized URL from its stdout, opens the
 browser, and stops the sidecar on quit. Measured against Tauri and Wails
 prototypes doing the same job with the same real portal:
 
-- **cold start is 5× better** — 392 ms against 2,023 ms — because the user's
-  browser has already paid the Chromium start-up and a webview has not;
+- **cold start is about 1.6 s faster** — roughly 0.6 s against 2.1–2.2 s end to
+  end, including the portal's own boot — because the user's browser has already
+  paid the Chromium start-up and a webview has not;
 - **memory depends on whether a browser is already open, and a native shell
   never gets the cheap case.** Reusing an open browser costs 185.0 MB against
-  437.8 MB for a Tauri window; starting one costs 812.8 MB. WebView2 *is*
+  437.8 MB for a Tauri window; starting one costs 862.8 MB. WebView2 *is*
   Chromium — a native shell starts a second one that shares nothing with the
-  user's, and pays that whether or not a browser is running. This rests on the
-  assumption that users typically keep a browser open, which is named as an
-  assumption in the decision document rather than treated as measured;
+  user's, and pays that whether or not a browser is running. Two caveats the
+  decision document carries and this summary must not drop: it rests on the
+  assumption that users typically keep a browser open, and both browser figures
+  are for dedicated Edge profiles that were neither clean nor in the same state
+  as each other;
 - **the installer differs by 3.32 MiB** between all three shells;
 - **the toolchain differs by 3 GB**: Rust costs ~3.08 GB and a 149-second clean
-  build, Go ~823 MB and 18.6 s, the tray helper 12 KB and 0.56 s with a compiler
-  Windows already ships.
+  build, Go ~823 MB and 18.6 s, the tray helper 13.6 KB and under a second with
+  a compiler Windows already ships.
 
 The no-bundler rule survives better this way than it would have under Tauri,
 which also downloads 129 MB of NSIS and WiX on first build.
