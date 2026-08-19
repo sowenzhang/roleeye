@@ -106,7 +106,11 @@ the Phase 5 form-answering work from `docs/vision.md` §8.
 ## Ready now
 
 ### P9-0 — Decide the desktop shell: Tauri, Wails, or no native shell
-- status: todo
+- status: done (2026-08-18) — no native shell: a Windows tray helper rendering in
+  the user's browser, with the Node runtime bundled; Tauri named as the fallback
+  with four reversal conditions. Recorded in `docs/desktop-shell-decision.md`.
+- verdict: ACCEPT (round 3) · attempts: 3 · stalls: 0
+- baseline: f04f8ca68c18735f054015b5b245ed1cf1b6580e
 - depends: —
 - why: `docs/vision.md` §3.1 names Tauri, but it argues for a *property* — a
   window that loads `127.0.0.1` and supervises the Node CLI as a sidecar — and
@@ -144,6 +148,79 @@ the Phase 5 form-answering work from `docs/vision.md` §8.
         if the outcome is that Tauri was right — and one row is added to the
         decisions log in `docs/progress.md`
   - [ ] no prototype code is merged into `src/`
+
+```text
+## SETTLEMENT RECORD — P9-0 Decide the desktop shell: Tauri, Wails, or no native shell
+Verdict: ACCEPT   Rounds: 3   Stalls: 0
+Worker: Claude Opus 5      Evaluator: gpt-5.6-sol
+
+Built
+- `docs/desktop-shell-decision.md` (37,738 B): three candidates — Tauri, Wails,
+  and no native shell in three variants — each driven against the real
+  token-bearing `roleeye ui` portal as a supervised sidecar, measured on this
+  machine under one stated method, with the update path, toolchain cost, G-9
+  and Windows-specific consequences argued rather than asserted.
+- The decision: no native shell. A Windows tray helper rendering in the user's
+  browser, with the Node runtime bundled. Tauri is the named fallback with four
+  reversal conditions, two testable in P9-1/P9-3.
+- `docs/vision.md` §3/§3.1 and `architecture.md` §33 no longer assert Tauri;
+  two rows added to the `docs/progress.md` decisions log, one of them marked
+  Reversed against the 2026-08-13 Tauri row.
+
+Blockers raised: 4 — fixed 4, withdrawn 0, settled 0, escalated 0
+[F1] measurements — FIXED: the resident-memory method counted only new process
+     IDs, so the warm-browser candidate's footprint excluded growth inside Edge
+     processes that already existed — undercounting the option the
+     recommendation favours. Re-measured by command-line process-set membership
+     and before/after working-set deltas, 5 runs, medians and ranges. The
+     corrected figure moved against the worker's own prediction (440.3 MB →
+     185.0 MB warm, 812.8 MB cold) and was reported rather than banked.
+[F2] acceptance criteria — FIXED: the Windows update path, an explicit
+     criterion, was unaddressed for the chosen option. New §5.1 covers all three
+     candidates and establishes four constraints by measurement.
+[F3] false measurement claim — FIXED: §5.1 claimed `better-sqlite3` loaded
+     "against the shipped runtime", but the test had installed the
+     required-Node package and launched system Node. The worker took the harder
+     of the two offered remedies and ran the bundled package for real.
+[F4] false update-path claim — FIXED: the document claimed install-over-the-top
+     destroys colocated data; the NSIS script deletes only on uninstall.
+     Re-tested both halves: over-the-top survives, uninstall destroys.
+
+Trade-offs accepted
+- The recommendation now rests on an unmeasured behavioural assumption — that
+  users keep a browser open. Named as an assumption in §3.3 and §8 rather than
+  presented as measured. Given up: a clean headline. Gained: a claim that does
+  not overstate its evidence, and a stated case where the decision is worse for
+  the user.
+- Working sets are summed without correcting for shared pages, inflating every
+  multi-process candidate. Distorts absolutes more than the comparison.
+- §5.1 stops at analysis: no updater was built and no signed update applied.
+  That was the scope the finding set, and it is enough to answer whether the
+  update path reverses the shell choice. It does not.
+- The bundled-runtime check demonstrates self-sufficiency, not ABI pinning —
+  bundled and system Node are the same version here. Recorded in §8 rather than
+  overstated.
+- `architecture.md` §33 was edited although the task did not list it, because
+  leaving it asserting Tauri would have created the documentation drift this
+  project logs decisions about.
+
+Follow-ups created
+- None. The evaluator raised no non-blocking findings in any round.
+
+Not done, deliberately
+- The tray helper itself — P9-1. Prototypes are throwaway and remain outside the
+  repository in `%TEMP%\roleeye-p9-0-spike`; `src/` and `tests/` were never
+  touched in any round.
+- Moving `data/`, `config/`, `profile/` and `artifacts/` out of any install
+  layout — recorded as a constraint inherited by P9-1 and G-4, and logged in the
+  decisions log, after an uninstall was observed deleting the career database.
+- `roleeye ui` exiting when stdin closes, and the tokenized URL landing in
+  browser history — both named as costs of this decision, both P9-1.
+- The toast-identity experiment, which failed to discriminate and is recorded as
+  unverified rather than filled in with a vendor claim. It is reversal
+  condition 2 and the load-bearing unknown for P9-3.
+- An end-to-end signed update, and a real ABI-mismatch test — §8, scoped to G-4.
+```
 
 ### P9-1 — Desktop shell over the existing portal
 - status: todo
