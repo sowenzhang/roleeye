@@ -282,16 +282,33 @@ say so.
 
 If the worker contests an `[R<n>]` on grounds you cannot settle by running
 something — a design argument rather than a fact — that finding was mis-filed.
-**Do not drop it.** You have no independent view of the code, so "this objection
-sounds reasonable" is not a judgement you are entitled to make, and a worker who
-learns that a design-flavoured contest makes a finding disappear has been handed
-a way to launder real defects. Hand it to the evaluator instead, as a hypothesis
-to probe in its next round, and say you are doing so. It stays open on the ledger
-under its original id until the evaluator closes it or the worker fixes it.
+**Do not drop it on the worker's say-so.** You have no independent view of the
+code, so "this objection sounds reasonable" is not a judgement you are entitled
+to make, and a worker who learns that a design-flavoured contest makes a finding
+disappear has been handed a way to launder real defects.
+
+Re-file it instead. Withdraw the `[R<n>]` from the ledger — recording in the
+settlement record that it was withdrawn as mis-filed, not as wrong — and put the
+underlying question to the evaluator in its next round as a hypothesis to probe,
+quoting the finding and the worker's argument. If the evaluator agrees there is a
+problem it raises its own `[F<n>]`, priced, and the negotiation proceeds
+normally; if it does not, the matter is closed by someone entitled to close it.
+
+Note what this is *not*: you are not handing the evaluator an `[R]` to
+adjudicate. Its agent file forbids that, and for good reason — it never saw the
+rubber-duck's reasoning. You are retiring a finding that was filed in the wrong
+category and asking the right reviewer the underlying question from scratch. The
+routing is mandatory; the outcome is not yours.
 
 **Do not relay the rubber-duck's findings into the evaluator's pre-read**, and do
 not let the evaluator see them before it forms its own verdict on a round. Its
 independence is the property being protected.
+
+From the second round on, the pass has one extra job: quote it every `[R]` the
+worker has reported FIXED and require it to say, for each, whether the fix holds
+or the defect has recurred. It cannot remember its own findings, and a fix that
+silently did not work is otherwise indistinguishable from progress — see *The
+merged finding ledger* in Step 4.
 
 Both prompts must include, in full (they are stateless and cannot see this
 session):
@@ -476,14 +493,19 @@ Five rules follow, and they are what make the ledger worth keeping:
   worker fixes it, or the worker contests it and you verify the contest by
   running something. It is never settled, because a fact has no price.
 - **A `FIXED` claim on an `[R]` is provisional until the next pass agrees.** The
-  rubber-duck is stateless: it cannot remember what it raised last round, so if
-  the worker's fix did not work it will re-raise the same defect as a brand-new
-  finding. Treated naively that is a closure followed by a fresh finding, which
-  resets the stall count and lets the same defect circulate forever while the
-  loop reports progress. So when a new `[R]` describes a defect you already have
-  on the ledger, **give it the original id and reopen it** rather than entering
-  it as new, and rescind the closure it was credited with. Matching them is
-  clerical work on two texts, not a judgement about the code.
+  rubber-duck cannot remember what it raised last round, so if the worker's fix
+  did not work it will re-raise the same defect as a brand-new finding. Treated
+  naively that is a closure followed by a fresh finding, which resets the stall
+  count and lets one defect circulate forever while the loop reports progress.
+  **Do not fix this by matching the two texts yourself.** Deciding whether "an
+  off-by-one" and "loop bound excludes the last element" are the same underlying
+  flaw is defect triage, it needs a view of the code, and it is exactly the
+  judgement you are not entitled to. Give the work to the reviewer that is: in
+  each rubber-duck prompt after the first, list the `[R]` findings the worker has
+  reported FIXED, quote them, and require the pass to state for each whether it
+  is genuinely resolved or has recurred. A recurrence keeps its original id, the
+  earlier closure is rescinded, and the round that claimed it does not count as
+  progress. You are recording the reviewer's answer, not forming one.
 - **Only `[F<n>]` findings are negotiated.** The evaluator prices its blocker, the
   worker may counter with a narrower fix or a bounded deferral, and the two of
   them reach a decision. You relay that exchange; you do not take part in it.

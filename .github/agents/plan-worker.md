@@ -118,8 +118,8 @@ them:
 
 - **`[F<n>]` — the evaluator, about your reasoning.** It comes with a price: what
   the defect costs against what the fix costs. That price is an opening position,
-  so all four responses below are open to you, including proposing a different
-  price. This is a negotiation and you are expected to argue.
+  so every response below is open to you, including proposing a different price.
+  This is a negotiation and you are expected to argue.
 - **`[R<n>]` — the code-level reviewer, about your lines.** It is a factual claim
   about what the code does. Either it is true and you fix it, or it is false and
   you show it is false. **There is nothing here to negotiate**, so do not propose
