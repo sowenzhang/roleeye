@@ -19,10 +19,15 @@ selectable.
 - **why** — the reason the work exists, not the remedy.
 - **acceptance** — checkable observables: a command, an output, a state change.
 - The orchestrator reserves a task by setting `in-progress` with `started`,
-  `baseline` (the commit SHA the review is taken from), `attempt` and `stalls`,
-  **before** spawning agents, and releases it by moving it to `done`, `blocked`,
-  or back to `todo`. `attempt` counts worker cycles and `stalls` counts
-  consecutive review rounds in which **no blocker closed** — closures, not the
+  `attempt` and `stalls`, **before** spawning agents, and releases it by moving
+  it to `done`, `blocked`, or back to `todo`. `baseline` — the commit SHA the
+  review is taken from — is captured *after* the reservation edit has been
+  committed, because writing the reservation dirties the tree the loop requires
+  to be clean and a SHA taken before it no longer matches `HEAD`. It cannot be
+  written in the same edit that creates it, so it is recorded when the task
+  closes. `attempt` counts worker cycles and `stalls` counts
+  consecutive review rounds in which **no finding closed on the merged ledger** —
+  closures from the evaluator *and* the in-loop rubber-duck, not the
   net number of open blockers, because a round that closes two and raises two is
   progress rather than a stall. Only rounds that *enter* with an open blocker are
   eligible: the first review has nothing to close and never counts as a stall.
@@ -33,8 +38,9 @@ selectable.
   — with a blocker still open. The reason line names the decision a human owes
   the loop. It is never used for work that has not been attempted.
 - An interrupted run is **not resumable**. The reports and verdicts lived in the
-  orchestrator's context and are gone with it; only `started`, `baseline` and
-  `attempt` survive. A reservation found on entry is reported to the human, who
+  orchestrator's context and are gone with it; only `started`, `attempt` and
+  `stalls` survive, and an interrupted run may therefore carry no `baseline` at
+  all. A reservation found on entry is reported to the human, who
   decides whether to abandon the partial work or restart from a clean tree —
   never silently taken over, and never advertised as a resume.
 - Closes as `done` only after an `ACCEPT` or `ACCEPT_WITH_FOLLOWUPS` verdict, and

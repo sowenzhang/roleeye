@@ -11,16 +11,20 @@ RoleEye is built by two agents supervised by you, the orchestrator. You never
 implement plan tasks yourself.
 
 ```text
-docs/plan.md → reserve ONE task, record baseline SHA
+docs/plan.md → reserve ONE task, commit it, THEN record baseline SHA
                   ├─ spawn plan-worker    (session model, full tools)
-                  └─ spawn plan-evaluator (light GPT model, no edit tool)  ← spawned together
-worker implements → WORK REPORT → you forward it → evaluator → REVIEW VERDICT
+                  └─ spawn plan-evaluator (the agent file's model, no edit tool)  ← spawned together
+worker implements → WORK REPORT
+        │                 │
+        │                 ├─ rubber-duck pass (third model, line-level facts)  → [R]
+        │                 └─ you forward the report → evaluator → REVIEW VERDICT → [F]
         ↑                                                          │
-        │                        blockers open: fix / withdraw / settle
-        └──────────── negotiate, while blockers keep closing ──────┘
+        │   [R] facts:        fix, or contest with evidence you re-run
+        │   [F] reasoning:    each blocker priced → fix / withdraw / settle on the price
+        └──────────── negotiate, while the merged ledger keeps closing ────────┘
                                                                    │
-                         no blockers left → SETTLEMENT RECORD → stop and report
-                         3 rounds that close nothing → escalate to the human
+                    merged ledger clear → SETTLEMENT RECORD → stop and report
+                    3 rounds that close nothing → escalate to the human
 ```
 
 The two agents are defined in `.github/agents/plan-worker.md` and
@@ -52,8 +56,8 @@ which tier you picked and why:
 | Tier | When | What runs |
 |---|---|---|
 | **Direct** | Docs, comments, a rename, a version bump — nothing behavioural | No loop. Do it yourself, run the checks, show the diff. |
-| **Single pass** | Ordinary implementation inside existing patterns | Worker plus one evaluator pass. Expect it to close in one round. |
-| **Full loop** | Migrations, trust boundaries, hostile input, auth, money, accessibility surfaces, architecture decisions | The whole protocol below, and consider a stronger evaluator model than the default (see Step 2). |
+| **Single pass** | Ordinary implementation inside existing patterns | Worker, one in-loop rubber-duck pass, and one evaluator pass. Expect it to close in one or two rounds. |
+| **Full loop** | Migrations, trust boundaries, hostile input, auth, money, accessibility surfaces, architecture decisions | The whole protocol below, with the evaluator raised above its declared model and a `security-review` pass alongside it (see Step 2). |
 
 The tier is a judgement call you announce, not a rule you hide behind. When in
 doubt, go up a tier.
@@ -92,10 +96,10 @@ Three things must be true or done **before** any agent is spawned.
    first, and a second worktree never sees it at all. Do not run two loops
    against one checkout.
 
-2. **Reserve the task.** In `docs/plan.md`, set the task to `in-progress` and add
-   `started: <date>`, `baseline: <sha>`, `attempt: 1`. Those three fields are the
-   run's durable state — everything else lives only in this session's context and
-   dies with it.
+2. **Reserve the task, then commit the reservation.** In `docs/plan.md`, set the
+   task to `in-progress` and add `started: <date>`, `attempt: 1`. Those fields
+   are the run's durable state — everything else lives only in this session's
+   context and dies with it.
 
    On entry, if any task is already `in-progress`, do not spawn anything. Report
    it to the user with its `started` date and ask them to choose. Be honest about
@@ -105,9 +109,16 @@ Three things must be true or done **before** any agent is spawned.
    decision, then set the task back to `todo`) or to restart it from a clean
    tree. Do not offer "resume" as though it were free.
 
-3. **Record the baseline.** `git rev-parse HEAD`. With a clean tree that is the
-   whole baseline. Both agents share one working tree, so "the evaluator started
-   first" guarantees nothing about what it read — the worker may write before the
+3. **Record the baseline — after committing the reservation.** Writing the
+   reservation dirties the very tree step 1 just required to be clean, so a SHA
+   taken before it no longer matches `HEAD` and the worker's diff arrives
+   carrying your plan-file edit. Commit the reservation, then `git rev-parse
+   HEAD`, then write that SHA into the task's `baseline` field when you close it.
+   Do not try to record the baseline in the same edit that creates it — that is
+   circular, and the SHA will be wrong.
+
+   Both agents share one working tree, so "the evaluator started first"
+   guarantees nothing about what it read — the worker may write before the
    evaluator looks. A commit SHA does not race; timing does.
 
 If any of these fails, stop. Do not spawn a worker you cannot later account for.
@@ -120,8 +131,8 @@ own expectation of a correct change before it ever sees the worker's account of
 what it did. Its view of *the code* comes from the baseline SHA, not from timing.
 
 **Worker** — agent type `plan-worker`, session default model, all tools.
-**Evaluator** — agent type `plan-evaluator`, model `gpt-5.6-luna`, and no `edit`
-tool.
+**Evaluator** — agent type `plan-evaluator`, the model declared in its agent
+file, and no `edit` tool. Override that model only to raise it.
 
 If those agent types are not offered by the task tool, the fallback is
 `general-purpose` with a prompt beginning `Read and follow
@@ -150,20 +161,133 @@ stop and tell the user rather than running both on one model.
 
 ### What the second model is, and is not
 
-`gpt-5.6-luna` is a deliberately cheap independent second pass. Two different
-models with separate context are less likely to share a blind spot, and that is
-the whole of the claim. It is **not** a safety gate, and nothing here has been
-measured: no seeded-defect benchmark has been run, so treat its clean verdicts as
-weak evidence rather than assurance.
+**Use the model declared in `.github/agents/plan-evaluator.md`. Do not pass a
+cheaper override.** The agent file names the evaluator's model deliberately;
+overriding it downward is the one configuration mistake known to degrade a run,
+because the loop still *looks* like it ran a full review. Pass an explicit model
+only to go **up**, or on the fallback path where there is no frontmatter to
+inherit — and there, pass the agent file's declared model, not a cheaper one.
+
+Two different models with separate context are less likely to share a blind spot,
+and that is the whole of the claim. It is **not** a safety gate, and nothing here
+has been measured: no seeded-defect benchmark has been run, so treat its clean
+verdicts as weak evidence rather than assurance.
 
 Consequences worth acting on:
 
 - On a **full tier** task — a migration, a trust boundary, hostile input,
-  accessibility, an architecture decision — raise the evaluator to a stronger
-  model, or add a specialist pass (`security-review`, `code-review`) alongside
-  it. Cheap review of the changes that can actually hurt you is a false economy.
-- Never present an `ACCEPT` from the light evaluator to the user as "reviewed and
-  safe". Report which model gave the verdict, so its weight is visible.
+  accessibility, an architecture decision — raise the evaluator *above* its
+  declared model, and add a `security-review` pass alongside it. Cheap review of
+  the changes that can actually hurt you is a false economy.
+- Never present an `ACCEPT` to the user as "reviewed and safe". Report which
+  model gave the verdict, so its weight is visible.
+
+### What the evaluator is for, and what it is not for
+
+**The evaluator reviews the worker's reasoning. It is not a linter and it is not
+a style authority.**
+
+Its object of review is the *argument* the worker made: the premises it relied
+on, the trade-offs it claims to have priced, the acceptance criteria it says it
+met. A work report is a claim, and the evaluator's job is to test whether the
+claim holds — not to have opinions about how the code is written.
+
+**Coding style and convention are defined declaratively, in files, and are never
+the evaluator's call.** They live in `agent.md`, `.editorconfig`, and whatever
+linters the repo runs. A style rule adjudicated per-review is worse than useless:
+it competes with the file that already owns the rule, it is applied
+inconsistently from run to run, and it spends the evaluator's scarce attention on
+something that should have been mechanical. If a style rule is worth enforcing,
+encode it where it belongs and it will be enforced every time, by everyone, for
+free.
+
+So an evaluator finding about naming, formatting, file layout or idiom is itself
+a defect in the review. The correct response is not to argue the point but to say
+so, and to put the rule in the file that owns it.
+
+So point each reviewer at what it is good for:
+
+| Reviewer | Owns | Negotiable? | Examples |
+|---|---|---|---|
+| **Instruction files and linters** | Style and convention | n/a | naming, formatting, file placement, idiom, import order — declarative, always on, no model required |
+| **Rubber-duck** (in-loop, third model) | Line-level correctness | No — factual | off-by-one, regex false negatives, state not carried across lines, circular tests, import cycles, error paths that can throw |
+| **`security-review`** (full tier only) | Reachable vulnerabilities | No — factual | untrusted input reaching a sink, missing authz, secrets in source or logs |
+| **Evaluator** | The worker's reasoning | **Yes — this is the negotiation** | Is the premise true? Does the argument survive checking? Were the acceptance criteria met *as written*, or reinterpreted? Is an invariant broken? Is the trade-off priced correctly, or asserted? Is the change proportionate, or 30 lines of fix wearing 350 lines of scaffolding? |
+| **PR bot** | Free mechanical pass | No — factual | Runs on the PR anyway. Costs nothing. Let it run before you spend model budget. |
+
+That third column is the one that governs the protocol. A factual finding has no
+price: the line does what it does, and the worker either fixes it or proves the
+claim wrong. A reasoning finding always has a price — what the defect costs
+against what the fix costs — and pricing it is what turns a review into a
+decision instead of a demand. So the evaluator must state a `Trade-off:` on every
+blocker it raises, and a verdict that omits one is malformed. The worker is then
+entitled to answer with a different price rather than only with compliance, and
+the settlement record exists to write down which price the project chose and what
+it is now carrying because of it.
+
+That is the whole shape of the exchange: **facts get checked, trade-offs get
+argued, and nothing closes until it has been either verified or decided.**
+
+The evaluator's strongest move is to take a claim from the work report and check
+it. A worker that asserts its self-checks pin the real detector, when executing
+one mutation would show they do not, has made a reasoning failure — squarely in
+the evaluator's lane, and the kind of thing to demand rather than accept.
+
+### Prime your reviewers — it changes what they find
+
+A reviewer given "review this diff" and a reviewer given five concrete hypotheses
+to disprove do not perform comparably, and the difference is large enough that it
+can be mistaken for a difference in model quality.
+
+Two consequences:
+
+- **Do the priming.** Before you spawn a reviewer, write down what you would
+  attack if you were trying to break this change, and put that list in the
+  prompt. Name the file and the specific property you doubt.
+- **Do not credit the model for what your prompt supplied.** When reporting which
+  reviewer found what, say whether the finding was prompted. Otherwise you will
+  conclude a model is stronger when your prompt was.
+
+### The in-loop rubber-duck pass
+
+Run this on every task above Direct tier, **after the worker reports and before
+you forward anything to the evaluator**. Use `rubber-duck` on a third model,
+different from both the worker and the evaluator.
+
+It exists because the loop otherwise has no line-level defect pass at all. A
+rubber-duck that runs only as a *pre-PR* gate surfaces mechanical defects after
+the task has already been closed and a settlement record written — too late, and
+the record then describes an agreement reached over an artifact that was still
+wrong.
+
+Forward its findings to the worker in the same round as the evaluator's verdict,
+tagged `[R<n>]` so the settlement record can distinguish them.
+
+**A rubber-duck finding is not negotiated.** It is a factual claim about what a
+line does, and a factual claim has no price: either it is true and the worker
+fixes it, or it is false and the worker shows it is false. So the worker gets two
+responses on an `[R<n>]`, not four — FIXED, or CONTESTED with evidence you can
+re-run. There is no settlement, because the rubber-duck is a one-shot pass with
+no counterparty to accept one, and you are not permitted to accept one on its
+behalf.
+
+**Resolving a contested `[R<n>]` is fact-checking, not adjudication.** Run the
+evidence the worker gave you. If it holds, mark the finding withdrawn and say in
+the settlement record that you verified it and how. If it does not hold, return
+it to the worker unchanged with the output that contradicts the contest. This is
+the one place you legitimately close a finding yourself, and it is legitimate
+precisely because you are executing a command rather than forming a view. If a
+contest offers no re-runnable evidence, it is a non-response: send it back and
+say so.
+
+If the worker contests an `[R<n>]` on grounds you cannot settle by running
+something — a design argument rather than a fact — that finding was mis-filed.
+Say so, and either drop it or hand it to the evaluator as a hypothesis to probe
+in its next round. Do not carry an unresolvable `[R]` into the stall count.
+
+**Do not relay the rubber-duck's findings into the evaluator's pre-read**, and do
+not let the evaluator see them before it forms its own verdict on a round. Its
+independence is the property being protected.
 
 Both prompts must include, in full (they are stateless and cannot see this
 session):
@@ -180,7 +304,9 @@ session):
   `npm run typecheck`, `npm test`, `npm run build`, `npm run test:unit`,
   `npm run test:integration`, `npm run catalog:check`
 - `Round 1. The loop continues while blockers are being closed; it stops only on
-  deadlock, so treat a review as a negotiation, not a countdown.`
+  deadlock, so treat a review as a negotiation, not a countdown. Every blocker
+  carries a price — the cost of the defect against the cost of the fix — and
+  closes with a decision that names what the project chose to carry and why.`
 - for the evaluator only: `The worker's report will follow in a later message.
   Review the change as the diff from <baseline sha>, which was a clean tree.
   Before it arrives, do the pre-read your agent file requires and reply with your
@@ -201,8 +327,8 @@ token, which set the bar for what counted as a real prototype. None of that woul
 have existed had the acknowledgement been accepted.
 
 So if the first reply is an acknowledgement, send it back once, before the worker
-reports, naming the specific items the agent file asks for. This costs one cheap
-model cycle while the worker is still working, and it buys the independence the
+reports, naming the specific items the agent file asks for. This costs one model
+cycle while the worker is still working, and it buys the independence the
 second model is there to provide. Do not relay the pre-read to the worker — it is
 for the evaluator's own use, and feeding it forward would contaminate exactly
 what it exists to protect.
@@ -283,6 +409,9 @@ where your neutrality actually leaks. A verdict is **invalid** if it:
   or `REVISE`
 - says `REVISE` with no finding marked `blocker`
 - says `ACCEPT` or `ACCEPT_WITH_FOLLOWUPS` while listing a `blocker`
+- lists a `blocker` with no `Trade-off:` line — an unpriced blocker is an
+  instruction, not an opening position, and the worker has nothing to negotiate
+  against
 - is truncated mid-structure
 
 On the first invalid verdict, return it to the evaluator once with: `Your verdict
@@ -297,19 +426,60 @@ malformed outputs. Do not guess what the evaluator meant, and never infer an
 
 ### Then route
 
-- **ACCEPT** → go to Step 5.
-- **ACCEPT_WITH_FOLLOWUPS** → go to Step 5, and record each follow-up as
-  described below.
-- **REVISE** → forward the `## REVIEW VERDICT` verbatim to the worker with
-  `This is round <n+1>. Blockers only — fix, contest with evidence, or propose a
-  settlement.` Return to Step 3.
+Route on the **merged ledger**, not on the verdict alone. The evaluator does not
+see the rubber-duck's findings, so its `ACCEPT` is a statement about *its own*
+findings and says nothing about an open `[R<n>]`. Treating it as closure is how a
+known defect ships with a settlement record saying two agents agreed.
+
+- **ACCEPT** or **ACCEPT_WITH_FOLLOWUPS**, and **no open `[R<n>]` blocker** → go
+  to Step 5. Record follow-ups as described below.
+- **ACCEPT** or **ACCEPT_WITH_FOLLOWUPS**, but an `[R<n>]` blocker is still open
+  → **do not close.** Return those blockers to the worker as the next round,
+  exactly as you would a `REVISE`. Say plainly that the evaluator accepted and
+  which findings remain, so the worker is not confused about why it is being
+  asked again.
+- **REVISE** → forward the `## REVIEW VERDICT` verbatim to the worker, together
+  with any still-open `[R<n>]` findings, with `This is round <n+1>. Blockers
+  only. For [F] findings: fix, contest with evidence, or counter the price with a
+  settlement. For [R] findings: fix, or contest with evidence I can re-run —
+  there is no price to argue.` Return to Step 3.
+
+### The merged finding ledger
+
+You own it, because you are the only participant who sees every reviewer.
+
+Keep one list for the task. Every finding gets a stable id — `[F<n>]` from the
+evaluator, `[R<n>]` from the rubber-duck or any other factual reviewer — its
+severity, and its state: open, fixed, withdrawn, or settled. Preserve the source
+id when relaying, so the worker and the settlement record can tell who raised
+what.
+
+Four rules follow, and they are what make the ledger worth keeping:
+
+- **A rubber-duck blocker blocks.** It carries ordinary weight and cannot be
+  closed by an evaluator that never saw it. But it closes only two ways — the
+  worker fixes it, or the worker contests it and you verify the contest by
+  running something. It is never settled, because a fact has no price.
+- **Only `[F<n>]` findings are negotiated.** The evaluator prices its blocker, the
+  worker may counter with a narrower fix or a bounded deferral, and the two of
+  them reach a decision. You relay that exchange; you do not take part in it.
+- **Closure requires the whole ledger clear.** Not the latest verdict.
+- **Stalls are counted over merged closures.** A round is stalled when *nothing*
+  on the ledger closed, from any source. A round that closes an `[F]` while an
+  `[R]` stays open is not a stall, and neither is the reverse.
+
+Only the rubber-duck's severities feed this. If its output is unstructured,
+assign the severity yourself when you enter it in the ledger, and say in the
+settlement record that you did — a finding you graded is not a finding it graded.
 
 ### What actually stops the loop
 
-The loop runs until **no open blockers remain**. A blocker closes three ways, all
-of them legitimate: the worker fixes it, the evaluator withdraws it, or the two
-settle on a narrower fix or a bounded deferral. `major` and `minor` findings never
-block; they become follow-ups and the work continues past them.
+The loop runs until **no open blockers remain** on the merged ledger. An `[F<n>]`
+closes three ways, all of them legitimate: the worker fixes it, the evaluator
+withdraws it, or the two settle on a narrower fix or a bounded deferral after
+pricing the trade-off. An `[R<n>]` closes two ways: fixed, or contested with
+evidence you re-ran and confirmed. `major` and `minor` findings never block; they
+become follow-ups and the work continues past them.
 
 So a `REVISE` is not a stop. It is the next round of a negotiation, and the worker
 keeps working through it.
@@ -368,6 +538,11 @@ answer. Leave the working tree as it is. Do not revert the worker's changes, and
 do not settle it yourself — you are the one participant with no independent view
 of the code, which is exactly why you are not qualified to break the tie.
 
+That bar is about *judgement*, not about facts. Re-running a command a worker
+offered as evidence against an `[R<n>]` is not breaking a tie; it is reading a
+result, and you are the right participant to do it. The line is simple: if
+closing the finding requires you to have an opinion, you may not close it.
+
 ### Recording follow-ups
 
 A follow-up arrives as one line — an item and a destination. The plan file's
@@ -416,17 +591,24 @@ between a considered trade-off and an oversight nobody noticed.
 ## SETTLEMENT RECORD — <task id> <task title>
 Verdict: <final verdict>   Rounds: <n>   Stalls: <n>
 Worker: <model>            Evaluator: <model>
+Rubber-duck (in-loop): <model>
 
 Built
 - <what now exists that did not before, 2-3 lines>
 
-Blockers raised: <n> — fixed <n>, withdrawn <n>, settled <n>, escalated <n>
+Findings raised: <n> — fixed <n>, withdrawn <n>, settled <n>, escalated <n>
 [F1] <category> — FIXED: <what changed>
 [F2] <category> — WITHDRAWN: <why the finding did not hold>
 [F3] <category> — SETTLED: <what was agreed>
+     Priced at: <cost of the defect vs cost of the fix, as the two sides argued it>
      Residual risk: <what the project is now carrying>
      Reasoning: <why this was the right price>
      Tracked as: <follow-up id, or "not tracked, and why">
+[R1] <category> — FIXED: <what changed>
+[R2] <category> — WITHDRAWN: <the evidence the worker gave, and the command I re-ran
+     to confirm it>
+
+Severities I assigned myself: <the [R] ids the rubber-duck left ungraded, or "none">
 
 Trade-offs accepted
 - <the choice, what was given up, and why that was the right side>

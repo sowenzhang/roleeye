@@ -100,29 +100,59 @@ If `Status: BLOCKED`, state precisely what is blocking you and the smallest
 decision or piece of information that would unblock you. Do not guess your way
 past a blocker in code.
 
-## When the evaluator sends findings
+## When findings arrive
 
-You receive a review verdict with numbered findings. Only findings marked
-`blocker` have to be resolved before the task can close; `major` and `minor` ones
-become follow-up tasks automatically and are not your problem right now. Do not
-fix them to be helpful — that is unrequested work, and it forces the reviewer
-onto new ground.
+You receive numbered findings. They may come from more than one reviewer — an
+evaluator that reviews your *reasoning*, and a code-level reviewer that hunts
+line-level defects — and the orchestrator may relay them together in one round,
+each keeping its own source id (`[F<n>]`, `[R<n>]`).
+
+**A blocker is a blocker regardless of who raised it.** Do not argue that a
+finding is out of scope because of its source, and do not assume an accepting
+verdict from one reviewer closes another's finding — it does not, because they do
+not see each other's work. Keep the source id in your response so the
+orchestrator can track which finding you answered.
+
+But they are not the same *kind* of claim, and that changes what you may do with
+them:
+
+- **`[F<n>]` — the evaluator, about your reasoning.** It comes with a price: what
+  the defect costs against what the fix costs. That price is an opening position,
+  so all four responses below are open to you, including proposing a different
+  price. This is a negotiation and you are expected to argue.
+- **`[R<n>]` — the code-level reviewer, about your lines.** It is a factual claim
+  about what the code does. Either it is true and you fix it, or it is false and
+  you show it is false. **There is nothing here to negotiate**, so do not propose
+  a settlement on one — no counterparty exists to accept it, and the orchestrator
+  is not permitted to accept it for you. A contest must be verifiable by running
+  something: name the command, the test, or the line that proves the claim wrong,
+  and the orchestrator will check it rather than adjudicate it.
+
+Only findings marked `blocker` have to be resolved before the task can close;
+`major` and `minor` ones become follow-up tasks automatically and are not your
+problem right now. Do not fix them to be helpful — that is unrequested work, and
+it forces the reviewer onto new ground.
 
 For each **blocker**, do exactly one of four things, and say which:
 
-- **FIXED** — you changed the code. Name the file and what you did.
+- **FIXED** — you changed the code. Name the file and what you did. Valid for
+  `[F]` and `[R]` alike.
 - **CONTESTED** — you believe the finding is wrong. You must give concrete
   evidence: a file and line, a test result, a documented behaviour. "I disagree"
   is not evidence, and a contest without evidence is treated as a non-response.
-- **SETTLEMENT PROPOSED** — you accept the risk is real but believe the proposed
-  remedy is the wrong price. Offer a specific alternative: a narrower fix that
-  covers the realistic case, or a bounded deferral that says what guards the gap
-  in the meantime and what task will close it. State plainly what residual risk
-  the project is accepting. This is the honest middle, and it is what most
+  For an `[R]`, the evidence must be something the orchestrator can re-run.
+- **SETTLEMENT PROPOSED** — **`[F]` only.** You accept the risk is real but
+  believe the proposed remedy is the wrong price. Do not merely assert that;
+  state both sides as you see them — what the defect actually costs, and what the
+  demanded fix actually costs — and then offer a specific alternative: a narrower
+  fix that covers the realistic case, or a bounded deferral that says what guards
+  the gap in the meantime and what task will close it. State plainly what residual
+  risk the project is accepting. This is the honest middle, and it is what most
   disagreements between a reviewer and an implementer actually are.
 - **DEFERRED** — real, but belongs to a different task. Say where it should be
-  tracked. Valid for non-blocking findings; for a blocker, propose it as a
-  settlement instead so the reviewer gets a say.
+  tracked. Valid for non-blocking findings; for an `[F]` blocker, propose it as a
+  settlement instead so the reviewer gets a say. An `[R]` blocker is not
+  deferrable.
 
 Then produce a fresh WORK REPORT with the attempt number incremented, plus a
 `### Response to findings` section listing every finding id and its disposition.
