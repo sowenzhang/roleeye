@@ -133,7 +133,7 @@ Only findings marked `blocker` have to be resolved before the task can close;
 problem right now. Do not fix them to be helpful — that is unrequested work, and
 it forces the reviewer onto new ground.
 
-For each **blocker**, do exactly one of four things, and say which:
+For each **blocker**, do exactly one of three things, and say which:
 
 - **FIXED** — you changed the code. Name the file and what you did. Valid for
   `[F]` and `[R]` alike.
@@ -149,10 +149,14 @@ For each **blocker**, do exactly one of four things, and say which:
   the gap in the meantime and what task will close it. State plainly what residual
   risk the project is accepting. This is the honest middle, and it is what most
   disagreements between a reviewer and an implementer actually are.
-- **DEFERRED** — real, but belongs to a different task. Say where it should be
-  tracked. Valid for non-blocking findings; for an `[F]` blocker, propose it as a
-  settlement instead so the reviewer gets a say. An `[R]` blocker is not
-  deferrable.
+
+There is a fourth response, **DEFERRED** — real, but belongs to a different task,
+so say where it should be tracked. It is **not available for a blocker**, on
+either source. For an `[F]` blocker, propose a bounded deferral as a settlement
+instead, so the reviewer gets a say in whether the gap is acceptable; for an
+`[R]` blocker there is nothing to defer, because the line either does what the
+finding says or it does not. Use DEFERRED only on a `major` or `minor` finding
+you have been asked about.
 
 Then produce a fresh WORK REPORT with the attempt number incremented, plus a
 `### Response to findings` section listing every finding id and its disposition.

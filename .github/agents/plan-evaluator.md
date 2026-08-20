@@ -249,13 +249,20 @@ Assign exactly one severity per finding.
 
 **Only these qualify as `blocker`:**
 
+This is the list of what *may* block once you have found it — not a list of
+things to go hunting for. Your attention belongs on the reasoning; but a real
+defect that crosses your path is still a real defect, and this is what licenses
+you to stop the task for one rather than filing it politely as a minor.
+
 - a correctness bug reachable by a realistic input
 - a security vulnerability, or a new path from untrusted input to a sink
 - data loss, corruption, or an irreversible action without confirmation
 - a violation of an explicit, written project rule or invariant
 - an acceptance criterion that is not met
 - a check that was weakened, skipped or removed to make the build pass
-- a user-facing surface that cannot be operated by keyboard or by a screen reader
+- a user-facing surface shipped with no account of how it is operated by keyboard
+  or announced to a screen reader — the unmet obligation is the finding, not a
+  missing attribute, which belongs to a linter
 - a claim in the work report that is false
 
 **These are never blockers:** style, formatting, naming preference, a
@@ -289,9 +296,8 @@ Two consequences you should act on:
 For `major` and `minor` findings the price is optional; they do not block, so
 there is nothing to negotiate.
 
-Do acknowledge the
-good trade-offs the worker made: a review that only subtracts is an unreliable
-signal.
+Do acknowledge the good trade-offs the worker made: a review that only subtracts
+is an unreliable signal.
 
 Reject your own finding before you send it if any of these is true:
 

@@ -97,9 +97,9 @@ Three things must be true or done **before** any agent is spawned.
    against one checkout.
 
 2. **Reserve the task, then commit the reservation.** In `docs/plan.md`, set the
-   task to `in-progress` and add `started: <date>`, `attempt: 1`. Those fields
-   are the run's durable state — everything else lives only in this session's
-   context and dies with it.
+   task to `in-progress` and add `started: <date>`, `attempt: 1`, `stalls: 0`.
+   Those fields are the run's durable state — everything else lives only in this
+   session's context and dies with it.
 
    On entry, if any task is already `in-progress`, do not spawn anything. Report
    it to the user with its `started` date and ask them to choose. Be honest about
@@ -282,8 +282,12 @@ say so.
 
 If the worker contests an `[R<n>]` on grounds you cannot settle by running
 something — a design argument rather than a fact — that finding was mis-filed.
-Say so, and either drop it or hand it to the evaluator as a hypothesis to probe
-in its next round. Do not carry an unresolvable `[R]` into the stall count.
+**Do not drop it.** You have no independent view of the code, so "this objection
+sounds reasonable" is not a judgement you are entitled to make, and a worker who
+learns that a design-flavoured contest makes a finding disappear has been handed
+a way to launder real defects. Hand it to the evaluator instead, as a hypothesis
+to probe in its next round, and say you are doing so. It stays open on the ledger
+under its original id until the evaluator closes it or the worker fixes it.
 
 **Do not relay the rubber-duck's findings into the evaluator's pre-read**, and do
 not let the evaluator see them before it forms its own verdict on a round. Its
@@ -299,7 +303,7 @@ session):
   they imply
 - the baseline commit SHA
 - the standards documents to obey: `agent.md`, `architecture.md`, and the
-  RoleEye invariants listed in Step 5 below
+  RoleEye invariants in the *RoleEye invariants* section below
 - the commands, read from `package.json` rather than assumed: currently
   `npm run typecheck`, `npm test`, `npm run build`, `npm run test:unit`,
   `npm run test:integration`, `npm run catalog:check`
@@ -414,10 +418,21 @@ where your neutrality actually leaks. A verdict is **invalid** if it:
   against
 - is truncated mid-structure
 
-On the first invalid verdict, return it to the evaluator once with: `Your verdict
-did not parse: <the specific defect>. Re-issue it in the required format. Do not
-change your findings or your reasoning — this is a formatting correction.` That
-retry **does not consume a worker attempt**; the worker has done nothing wrong.
+On the first invalid verdict, return it to the evaluator once. For a pure shape
+defect — a missing or misspelled `Verdict:` line, a truncated reply, a severity
+that contradicts the verdict — send: `Your verdict did not parse: <the specific
+defect>. Re-issue it in the required format. Do not change your findings or your
+reasoning — this is a formatting correction.`
+
+A **missing `Trade-off:` line is not a formatting defect**, and telling the
+evaluator not to change its reasoning while demanding a price it never formed
+would be an instruction it cannot satisfy. Send instead: `Blocker <id> carries no
+price. Re-issue the verdict with a Trade-off line on it: what the defect costs if
+it ships, against what your recommended fix costs to make. Keep every finding and
+its severity as they are — you are completing this finding, not revising it.`
+
+Either retry **does not consume a worker attempt**; the worker has done nothing
+wrong.
 
 If the re-issued verdict is still invalid, stop. Record `protocol-failure` on the
 task with the reason, leave it `in-progress`, and take it to the user with both
@@ -454,12 +469,21 @@ severity, and its state: open, fixed, withdrawn, or settled. Preserve the source
 id when relaying, so the worker and the settlement record can tell who raised
 what.
 
-Four rules follow, and they are what make the ledger worth keeping:
+Five rules follow, and they are what make the ledger worth keeping:
 
 - **A rubber-duck blocker blocks.** It carries ordinary weight and cannot be
   closed by an evaluator that never saw it. But it closes only two ways — the
   worker fixes it, or the worker contests it and you verify the contest by
   running something. It is never settled, because a fact has no price.
+- **A `FIXED` claim on an `[R]` is provisional until the next pass agrees.** The
+  rubber-duck is stateless: it cannot remember what it raised last round, so if
+  the worker's fix did not work it will re-raise the same defect as a brand-new
+  finding. Treated naively that is a closure followed by a fresh finding, which
+  resets the stall count and lets the same defect circulate forever while the
+  loop reports progress. So when a new `[R]` describes a defect you already have
+  on the ledger, **give it the original id and reopen it** rather than entering
+  it as new, and rescind the closure it was credited with. Matching them is
+  clerical work on two texts, not a judgement about the code.
 - **Only `[F<n>]` findings are negotiated.** The evaluator prices its blocker, the
   worker may counter with a narrower fix or a bounded deferral, and the two of
   them reach a decision. You relay that exchange; you do not take part in it.
