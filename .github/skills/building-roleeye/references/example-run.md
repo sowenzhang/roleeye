@@ -88,8 +88,28 @@ killed on close. No portal markup was copied into the shell.
 - Native notifications — that is P9-3.
 ```
 
-The orchestrator forwards this verbatim with the diff stat, and the evaluator
-answers.
+Before the report goes anywhere near the evaluator, the orchestrator runs the
+in-loop rubber-duck on a third model, and gets back facts rather than arguments.
+
+```text
+[R1] blocker · correctness · shell/src/main.rs:97
+     The retry loop is `for i in 0..3`, but the delay is `i * 500ms`. The first
+     iteration waits 0ms, so there are effectively two retries, not three.
+     Fix: `(i + 1) * 500`.
+
+[R2] minor · correctness · shell/src/port.rs:20
+     `is_free()` binds and drops without SO_REUSEADDR, so a port in TIME_WAIT
+     reports busy. Cosmetic on Windows, wrong on Linux.
+```
+
+Note what these are not: neither is negotiable, neither carries a price, and
+neither is the evaluator's business. `[R1]` blocks; `[R2]` becomes a follow-up.
+The orchestrator enters both on the ledger and forwards them to the worker in the
+same round as the verdict below — but does **not** show them to the evaluator,
+whose independence is the whole reason it was spawned early.
+
+The orchestrator forwards the work report verbatim with the diff stat, and the
+evaluator answers.
 
 ```text
 ## REVIEW VERDICT
@@ -110,6 +130,10 @@ Angles not applicable here: none — this change touches process, network and UI
      Evidence: added a 2s delay to the sidecar's listen call and the window
      rendered ERR_CONNECTION_REFUSED with no retry and no message.
      Impact: first-run users see a blank window and have nothing to act on.
+     Trade-off: a readiness poll is perhaps 20 lines and one timeout constant;
+     the defect makes every cold start on a slow machine look like a crash, and
+     it is the first thing a new user sees. The fix is much cheaper than the
+     first support conversation about it.
      Recommend: poll the port until it answers, with a timeout and a visible
      error state.
 
@@ -120,6 +144,9 @@ Angles not applicable here: none — this change touches process, network and UI
      {}", path, port)])`. `path` comes from a config value.
      Impact: a config file the user did not write — restored from a backup,
      synced, or edited by malware — becomes command execution.
+     Trade-off: dropping the shell is a three-line change with no behavioural
+     cost, against arbitrary command execution. There is nothing to weigh here,
+     and I am stating the price only because the protocol asks me to.
      Recommend: spawn the binary directly with argument vectors. No shell.
 
 [F3] major · UX · shell/src/main.rs:120
@@ -138,7 +165,9 @@ Angles not applicable here: none — this change touches process, network and UI
 ```
 
 **The worker is not stopped.** F3 and F4 do not block — they will become
-follow-ups. Two blockers are open, so there is a round 2.
+follow-ups. The ledger now carries three open blockers, `[F1]`, `[F2]` and
+`[R1]`, from two reviewers who never saw each other's work. All three must close
+before the task can.
 
 ---
 
@@ -155,10 +184,18 @@ Status: COMPLETE
      No shell, no interpolation. Added a test that a path containing `& calc`
      is passed through as one argument.
 
+[R1] FIXED — main.rs:97 now uses `(i + 1) * 500`. Added a test asserting three
+     non-zero waits. I note this was a factual claim and it was simply correct;
+     there was nothing to argue about.
+
 [F1] SETTLEMENT PROPOSED — I accept the race is real and reproducible. I do not
      accept the remedy as scoped. Polling with a visible error state pulls a
      retry UI into a task whose acceptance criteria are about the shell opening
      the portal at all, and P9-4 owns run-state display.
+     The price as I see it: the evaluator's version costs a retry component, a
+     new state machine and the tests for both — call it a day, in a task that is
+     otherwise done — and it duplicates work P9-4 will do properly. Mine costs
+     an hour and closes the actual defect, which is that the failure is silent.
      Proposed: poll the port for up to 10s at 100ms, then show a plain native
      dialog naming the failure and close. No retry UI, no new state machine.
      Residual risk: a machine slower than 10s to cold-start Node shows a dialog
@@ -166,7 +203,13 @@ Status: COMPLETE
      Tracked as: a follow-up for a proper error surface, owned by P9-4.
 ```
 
-The evaluator now has to decide whether that is a real answer or a dodge.
+The orchestrator re-runs the rubber-duck, which confirms `[R1]` is genuinely
+fixed rather than merely claimed, and raises nothing new. That closure is what
+lets the ledger clear; a claimed fix that came back would have kept the finding
+open under its original id.
+
+The evaluator now has to decide whether the settlement is a real answer or a
+dodge.
 
 ```text
 ## REVIEW VERDICT
@@ -191,8 +234,10 @@ Verdict: ACCEPT_WITH_FOLLOWUPS
 - Narrow the shell.open allowlist (was F4)
 ```
 
-Zero open blockers. The loop closes on round 2 — not because the worker gave in,
-and not because the evaluator did.
+Zero open blockers **on the merged ledger** — `[F2]` and `[R1]` fixed, `[F1]`
+settled. The loop closes on round 2: not because the worker gave in, not because
+the evaluator did, and not because one reviewer's `ACCEPT` was allowed to speak
+for the other's findings.
 
 ---
 
@@ -202,22 +247,31 @@ and not because the evaluator did.
 ## SETTLEMENT RECORD — P9-1 Desktop shell over the existing portal
 Verdict: ACCEPT_WITH_FOLLOWUPS   Rounds: 2   Stalls: 0
 Worker: claude-opus-4.6          Evaluator: gpt-5.6-luna
+Rubber-duck (in-loop): gemini-3.1-pro-preview   Security-review: not run (single pass)
 
 Built
 - A desktop shell that opens the existing portal over 127.0.0.1 and supervises
   the Node CLI as a sidecar. One UI implementation; the browser portal is
   unchanged. Production installer builds at 9.1 MB.
 
-Blockers raised: 2 — fixed 1, withdrawn 0, settled 1, escalated 0
+Findings raised: 3 blockers — fixed 2, withdrawn 0, settled 1, escalated 0
 [F2] security — FIXED: sidecar spawned via argument vector, not a shell string.
      A config-supplied path can no longer become command execution.
+[R1] correctness — FIXED: retry backoff was `i * 500`, so the first of three
+     retries waited 0ms. Now `(i + 1) * 500`, pinned by a test. Confirmed
+     resolved by the round-2 rubber-duck pass, not merely claimed.
 [F1] correctness — SETTLED: 10s readiness poll plus a native failure dialog,
      instead of a retry UI.
+     Priced at: a retry component, a state machine and their tests — roughly a
+     day, duplicating P9-4 — against an hour to name the failure. The defect
+     was the silence, not the absence of a retry.
      Residual risk: a machine slower than 10s to start Node gets a dialog and
      no app, with no in-app retry.
      Reasoning: the defect was the silent blank window, and that is gone. The
      retry surface belongs to P9-4, which owns run state.
      Tracked as: P9-4a
+
+Severities I assigned myself: none — the rubber-duck graded both of its findings
 
 Trade-offs accepted
 - Fixed port 7777 over negotiation. Simpler, and the portal already assumes a
@@ -227,6 +281,7 @@ Follow-ups created  (awaiting your approval before they become selectable)
 - P9-1a — Handle a port collision visibly
 - P9-4a — Real error surface for sidecar failure
 - P9-1b — Narrow the shell.open allowlist
+- P9-1c — Use SO_REUSEADDR in the port probe (was R2)
 
 Not done, deliberately
 - Native notifications — P9-3 owns them.
@@ -301,9 +356,11 @@ hour earlier. That is the second model doing precisely what it is for — and in
 that run, [F3] and [F4] were both false empirical claims caught by reading the
 spike's scripts rather than the prose asserting them.
 
-So the rule counts **closures**: a round is a stall only when nothing was fixed,
-withdrawn or settled, and only rounds that *enter* with an open blocker are
-eligible at all. Round 1 has nothing to close, so it is never a stall — which is
+So the rule counts **closures on the merged ledger**: a round is a stall only
+when nothing was fixed, withdrawn or settled — from *either* reviewer — and only
+rounds that *enter* with an open blocker are eligible at all. A round that closes
+an `[R]` while an `[F]` stays open is not a stall, and neither is the reverse.
+Round 1 has nothing to close, so it is never a stall — which is
 why the escalation above reaches three only after rounds 2, 3 and 4. New findings
 neither reset nor inflate the counter. Say which reading you applied when you
 report a round, so the human can see the loop's state rather than infer it from a
@@ -321,6 +378,13 @@ name it as a pattern, and the orchestrator to pass it on unsoftened.
 - A `REVISE` is a round, not a stop. The worker keeps working through it.
 - Only `blocker` findings hold a task open. `major` and `minor` become
   follow-ups and never delay a merge.
+- **Facts and prices are different arguments.** `[R1]` was a fact: the backoff
+  multiplied by zero on the first pass, and there was nothing to negotiate — it
+  was fixed and confirmed by re-running the pass. `[F1]` was a price, and got a
+  real negotiation. Sending a fact to the negotiation, or a price to the
+  fact-checker, is how a loop wastes rounds.
+- **One reviewer's `ACCEPT` cannot close another's finding.** The evaluator never
+  saw `[R1]`. Closure runs on the merged ledger, and nowhere else.
 - Progress is **closures, not the net count**. A round that closes two and raises
   two is converging, not stalling.
 - Most real disagreements are about **price, not existence** — F1 was never

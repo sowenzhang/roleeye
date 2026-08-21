@@ -103,9 +103,10 @@ past a blocker in code.
 ## When findings arrive
 
 You receive numbered findings. They may come from more than one reviewer — an
-evaluator that reviews your *reasoning*, and a code-level reviewer that hunts
-line-level defects — and the orchestrator may relay them together in one round,
-each keeping its own source id (`[F<n>]`, `[R<n>]`).
+evaluator that reviews your *reasoning*, a code-level reviewer that hunts
+line-level defects, and on some tasks a security reviewer — and the orchestrator
+may relay them together in one round, each keeping its own source id (`[F<n>]`,
+`[R<n>]`, `[S<n>]`).
 
 **A blocker is a blocker regardless of who raised it.** Do not argue that a
 finding is out of scope because of its source, and do not assume an accepting
@@ -120,13 +121,14 @@ them:
   the defect costs against what the fix costs. That price is an opening position,
   so every response below is open to you, including proposing a different price.
   This is a negotiation and you are expected to argue.
-- **`[R<n>]` — the code-level reviewer, about your lines.** It is a factual claim
-  about what the code does. Either it is true and you fix it, or it is false and
-  you show it is false. **There is nothing here to negotiate**, so do not propose
-  a settlement on one — no counterparty exists to accept it, and the orchestrator
-  is not permitted to accept it for you. A contest must be verifiable by running
-  something: name the command, the test, or the line that proves the claim wrong,
-  and the orchestrator will check it rather than adjudicate it.
+- **`[R<n>]` and `[S<n>]` — the code-level and security reviewers, about your
+  lines.** These are factual claims about what the code does. Either the claim is
+  true and you fix it, or it is false and you show it is false. **There is nothing
+  here to negotiate**, so do not propose a settlement on one — no counterparty
+  exists to accept it, and the orchestrator is not permitted to accept it for you.
+  A contest must be verifiable by running something: name the command or the test
+  that proves the claim wrong, and the orchestrator will check it rather than
+  adjudicate it.
 
 Only findings marked `blocker` have to be resolved before the task can close;
 `major` and `minor` ones become follow-up tasks automatically and are not your
@@ -140,7 +142,11 @@ For each **blocker**, do exactly one of three things, and say which:
 - **CONTESTED** — you believe the finding is wrong. You must give concrete
   evidence: a file and line, a test result, a documented behaviour. "I disagree"
   is not evidence, and a contest without evidence is treated as a non-response.
-  For an `[R]`, the evidence must be something the orchestrator can re-run.
+  For an `[R]` or `[S]`, a citation is **not** enough on its own: the orchestrator
+  closes these by *running* your evidence, not by reading and interpreting it, so
+  give it a command or a test it can execute and name the output that proves the
+  claim wrong. Point at the line as well by all means — but if there is nothing
+  to run, there is nothing it is allowed to conclude.
 - **SETTLEMENT PROPOSED** — **`[F]` only.** You accept the risk is real but
   believe the proposed remedy is the wrong price. Do not merely assert that;
   state both sides as you see them — what the defect actually costs, and what the

@@ -304,14 +304,56 @@ routing is mandatory; the outcome is not yours.
 not let the evaluator see them before it forms its own verdict on a round. Its
 independence is the property being protected.
 
+That prohibition has exactly one exception, and it is the re-filing path above: a
+finding withdrawn as mis-filed is no longer a rubber-duck finding, it is a
+question you are putting to the evaluator, and you put it *with* the round's
+material rather than ahead of it. Never send it during the pre-read, and never
+send one that has not first been withdrawn from the ledger.
+
 From the second round on, the pass has one extra job: quote it every `[R]` the
 worker has reported FIXED and require it to say, for each, whether the fix holds
 or the defect has recurred. It cannot remember its own findings, and a fix that
 silently did not work is otherwise indistinguishable from progress — see *The
 merged finding ledger* in Step 4.
 
-Both prompts must include, in full (they are stateless and cannot see this
-session):
+### What the factual reviewers get, and when
+
+The rubber-duck and, on a full tier, `security-review` are spawned **fresh each
+round**, after the worker reports and before you forward anything to the
+evaluator. They are one-shot: they hold no memory between rounds, so everything
+they need arrives in the prompt or does not exist.
+
+Spawn both in the same tool block. Each prompt carries:
+
+- the task id, title and acceptance criteria, quoted from the plan
+- the workspace root, OS and shell, resolved as above
+- `Review the diff from <baseline sha>: git --no-pager diff <baseline sha>`
+- the worker's `## WORK REPORT` **verbatim** — they are checking the artifact
+  against the claims made about it
+- the priming list required by *Prime your reviewers* above: what you would
+  attack if you were trying to break this change, naming files and the specific
+  properties you doubt
+- `You are read-only. Do not edit, create or delete any file. Report findings as
+  a numbered list; for each give a severity of blocker, major or minor, a
+  file:line, the problem, and the smallest fix. Report only defects you can point
+  at — no style, formatting or naming preferences, and no findings that would
+  have applied equally before this change.`
+- from round two on, for the rubber-duck only: the `[R]` findings the worker has
+  reported FIXED, quoted, with `State for each whether the fix holds or the
+  defect has recurred.`
+
+Tag their findings `[R<n>]` and `[S<n>]` respectively when you enter them in the
+ledger. Both are **factual**: they close by being fixed or by a contest you
+re-run, never by settlement. Record both models in the settlement record, and if
+either returns findings without severities, grade them yourself and say that you
+did.
+
+`security-review` is a built-in agent type; so is `rubber-duck`. Run each on a
+model different from the worker's, from the evaluator's, and from each other's.
+If you cannot get three distinct models, say so rather than quietly doubling up.
+
+Both the worker's and the evaluator's prompts must include, in full (they are
+stateless and cannot see this session):
 
 - the task id, title, description and acceptance criteria, quoted from the plan
 - the **absolute path of the current workspace root** — resolve it at runtime
@@ -459,38 +501,39 @@ malformed outputs. Do not guess what the evaluator meant, and never infer an
 ### Then route
 
 Route on the **merged ledger**, not on the verdict alone. The evaluator does not
-see the rubber-duck's findings, so its `ACCEPT` is a statement about *its own*
-findings and says nothing about an open `[R<n>]`. Treating it as closure is how a
-known defect ships with a settlement record saying two agents agreed.
+see the factual reviewers' findings, so its `ACCEPT` is a statement about *its
+own* findings and says nothing about an open `[R<n>]` or `[S<n>]`. Treating it as
+closure is how a known defect ships with a settlement record saying two agents
+agreed.
 
-- **ACCEPT** or **ACCEPT_WITH_FOLLOWUPS**, and **no open `[R<n>]` blocker** → go
-  to Step 5. Record follow-ups as described below.
-- **ACCEPT** or **ACCEPT_WITH_FOLLOWUPS**, but an `[R<n>]` blocker is still open
-  → **do not close.** Return those blockers to the worker as the next round,
-  exactly as you would a `REVISE`. Say plainly that the evaluator accepted and
-  which findings remain, so the worker is not confused about why it is being
+- **ACCEPT** or **ACCEPT_WITH_FOLLOWUPS**, and **no open `[R<n>]` or `[S<n>]`
+  blocker** → go to Step 5. Record follow-ups as described below.
+- **ACCEPT** or **ACCEPT_WITH_FOLLOWUPS**, but an `[R<n>]` or `[S<n>]` blocker is
+  still open → **do not close.** Return those blockers to the worker as the next
+  round, exactly as you would a `REVISE`. Say plainly that the evaluator accepted
+  and which findings remain, so the worker is not confused about why it is being
   asked again.
 - **REVISE** → forward the `## REVIEW VERDICT` verbatim to the worker, together
-  with any still-open `[R<n>]` findings, with `This is round <n+1>. Blockers
-  only. For [F] findings: fix, contest with evidence, or counter the price with a
-  settlement. For [R] findings: fix, or contest with evidence I can re-run —
-  there is no price to argue.` Return to Step 3.
+  with any still-open `[R<n>]` and `[S<n>]` findings, with `This is round <n+1>.
+  Blockers only. For [F] findings: fix, contest with evidence, or counter the
+  price with a settlement. For [R] and [S] findings: fix, or contest with
+  evidence I can re-run — there is no price to argue.` Return to Step 3.
 
 ### The merged finding ledger
 
 You own it, because you are the only participant who sees every reviewer.
 
 Keep one list for the task. Every finding gets a stable id — `[F<n>]` from the
-evaluator, `[R<n>]` from the rubber-duck or any other factual reviewer — its
-severity, and its state: open, fixed, withdrawn, or settled. Preserve the source
-id when relaying, so the worker and the settlement record can tell who raised
-what.
+evaluator, `[R<n>]` from the rubber-duck, `[S<n>]` from `security-review` on a
+full tier — its severity, and its state: open, fixed, withdrawn, or settled.
+Preserve the source id when relaying, so the worker and the settlement record can
+tell who raised what.
 
 Five rules follow, and they are what make the ledger worth keeping:
 
-- **A rubber-duck blocker blocks.** It carries ordinary weight and cannot be
-  closed by an evaluator that never saw it. But it closes only two ways — the
-  worker fixes it, or the worker contests it and you verify the contest by
+- **A factual blocker blocks.** An `[R]` or `[S]` carries ordinary weight and
+  cannot be closed by an evaluator that never saw it. But it closes only two ways
+  — the worker fixes it, or the worker contests it and you verify the contest by
   running something. It is never settled, because a fact has no price.
 - **A `FIXED` claim on an `[R]` is provisional until the next pass agrees.** The
   rubber-duck cannot remember what it raised last round, so if the worker's fix
@@ -514,18 +557,19 @@ Five rules follow, and they are what make the ledger worth keeping:
   on the ledger closed, from any source. A round that closes an `[F]` while an
   `[R]` stays open is not a stall, and neither is the reverse.
 
-Only the rubber-duck's severities feed this. If its output is unstructured,
-assign the severity yourself when you enter it in the ledger, and say in the
-settlement record that you did — a finding you graded is not a finding it graded.
+Only the factual reviewers' severities feed this. If either returns findings
+without severities, assign them yourself when you enter them in the ledger, and
+say in the settlement record that you did — a finding you graded is not a finding
+it graded.
 
 ### What actually stops the loop
 
 The loop runs until **no open blockers remain** on the merged ledger. An `[F<n>]`
 closes three ways, all of them legitimate: the worker fixes it, the evaluator
 withdraws it, or the two settle on a narrower fix or a bounded deferral after
-pricing the trade-off. An `[R<n>]` closes two ways: fixed, or contested with
-evidence you re-ran and confirmed. `major` and `minor` findings never block; they
-become follow-ups and the work continues past them.
+pricing the trade-off. An `[R<n>]` or `[S<n>]` closes two ways: fixed, or
+contested with evidence you re-ran and confirmed. `major` and `minor` findings
+never block; they become follow-ups and the work continues past them.
 
 So a `REVISE` is not a stop. It is the next round of a negotiation, and the worker
 keeps working through it.
@@ -637,7 +681,7 @@ between a considered trade-off and an oversight nobody noticed.
 ## SETTLEMENT RECORD — <task id> <task title>
 Verdict: <final verdict>   Rounds: <n>   Stalls: <n>
 Worker: <model>            Evaluator: <model>
-Rubber-duck (in-loop): <model>
+Rubber-duck (in-loop): <model>   Security-review (full tier): <model, or "not run">
 
 Built
 - <what now exists that did not before, 2-3 lines>
@@ -653,6 +697,7 @@ Findings raised: <n> — fixed <n>, withdrawn <n>, settled <n>, escalated <n>
 [R1] <category> — FIXED: <what changed>
 [R2] <category> — WITHDRAWN: <the evidence the worker gave, and the command I re-ran
      to confirm it>
+[S1] <category> — FIXED: <what changed>   (full tier only)
 
 Severities I assigned myself: <the [R] ids the rubber-duck left ungraded, or "none">
 
@@ -679,7 +724,11 @@ Then **stop**. One task per skill invocation, and ask before starting the next.
 The human stays in the loop between steps, which is the rule RoleEye itself is
 built on.
 
-Do not commit or push unless the user asks.
+Do not commit or push unless the user asks. The **one** exception is the
+reservation commit in Step 1, which the protocol requires: it is what makes the
+baseline SHA meaningful, it touches only `docs/plan.md`, and it is yours rather
+than the worker's. Nothing else — not the worker's changes, not the settlement
+record, not a follow-up entry — is committed without being asked.
 
 ## RoleEye invariants — pass these to both agents
 
