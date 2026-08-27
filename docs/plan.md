@@ -1,8 +1,9 @@
 # RoleEye Plan
 
 The single work queue for the `building-roleeye` skill. One task is taken per
-skill invocation, implemented by the worker agent, reviewed by the evaluator
-agent, and closed here by the orchestrator.
+skill invocation, implemented by the agent running the skill, criticised by two
+independent critics on different models, and closed here once every blocker has
+closed and validation has passed.
 
 ## Contract
 
@@ -18,29 +19,23 @@ selectable.
 - **depends** — task ids, or `—`.
 - **why** — the reason the work exists, not the remedy.
 - **acceptance** — checkable observables: a command, an output, a state change.
-- The orchestrator reserves a task by setting `in-progress` with `started`,
-  `baseline` (the commit SHA the review is taken from), `attempt` and `stalls`,
-  **before** spawning agents, and releases it by moving it to `done`, `blocked`,
-  or back to `todo`. `attempt` counts worker cycles and `stalls` counts
-  consecutive review rounds in which **no blocker closed** — closures, not the
-  net number of open blockers, because a round that closes two and raises two is
-  progress rather than a stall. Only rounds that *enter* with an open blocker are
-  eligible: the first review has nothing to close and never counts as a stall.
-  Both are updated as the loop
-  runs, so a task that has already argued its way to a deadlock cannot quietly
-  start over at zero.
-- `blocked` means the loop deadlocked — three consecutive rounds closing nothing
-  — with a blocker still open. The reason line names the decision a human owes
-  the loop. It is never used for work that has not been attempted.
-- An interrupted run is **not resumable**. The reports and verdicts lived in the
-  orchestrator's context and are gone with it; only `started`, `baseline` and
-  `attempt` survive. A reservation found on entry is reported to the human, who
-  decides whether to abandon the partial work or restart from a clean tree —
-  never silently taken over, and never advertised as a resume.
-- Closes as `done` only after an `ACCEPT` or `ACCEPT_WITH_FOLLOWUPS` verdict, and
-  records `attempts`, `stalls`, the verdict, and a settlement record naming every
-  blocker that was fixed, withdrawn or settled, with the residual risk of each
-  settlement.
+- The agent reserves a task by setting `in-progress` with `started`, **before**
+  it begins implementing, and releases it by moving it to `done`, `blocked`, or
+  back to `todo`. On closing it records `rounds` and `stalls`. `stalls` counts
+  consecutive critique rounds in which **no finding closed** — closures from
+  either critic, not the net number of open blockers, because a round that closes
+  two and raises two is progress rather than a stall. Only rounds that *enter*
+  with an open blocker are eligible: the first critique has nothing to close and
+  never counts as a stall.
+- An interrupted run is **not resumable**. The report and the critiques lived in
+  the agent's context and are gone with it; only `started` survives. A
+  reservation found on entry is reported to the human, who decides whether to
+  abandon the partial work or restart — never silently taken over, and never
+  advertised as a resume.
+- Closes as `done` only after every blocker has closed and validation passed, and
+  records `rounds`, `stalls`, the final verdict, and a settlement record naming
+  every blocker that was fixed, withdrawn or settled, with the residual risk of
+  each settlement.
 - `blocked` means the loop deadlocked — three consecutive rounds closing no
   blocker — with one still open. The reason line names the decision a human owes
   the loop. It is never used for work that has not been attempted.
@@ -59,14 +54,15 @@ selectable.
 - `deferred` means real but unscheduled. `gated` means held by a design
   precondition rather than by a failed attempt.
 - Promoting an entry means giving it acceptance criteria and a `todo` status and
-  moving it under *Ready now*. That is a deliberate act, not something the
-  orchestrator does on its way past.
+  moving it under *Ready now*. That is a deliberate act, not something the agent
+  does on its way past.
 
 **Both:**
 
-- Only the orchestrator edits this file. The worker agent must never touch it.
-- Review follow-ups are appended as complete entries in whichever section they
-  qualify for, tagged `(from <id> review)`, never folded silently into the task
+- Only the agent running the skill edits this file, and only at the points the
+  skill names. The critics are read-only and must never touch it.
+- Critique follow-ups are appended as complete entries in whichever section they
+  qualify for, tagged `(from <id> critique)`, never folded silently into the task
   being closed. A follow-up without checkable acceptance criteria belongs in the
   backlog, not in Ready now.
 
@@ -155,6 +151,9 @@ the Phase 5 form-answering work from `docs/vision.md` §8.
 
 ```text
 ## SETTLEMENT RECORD — P9-0 Decide the desktop shell: Tauri, Wails, or no native shell
+[Historical format: this task ran under the superseded dual-agent worker/evaluator
+protocol, before the loop was replaced by a single author plus two independent
+critics. Read it for the decision, not for the sequencing.]
 Verdict: ACCEPT   Rounds: 6   Stalls: 0   Blockers raised: 10, all closed
 Worker: Claude Opus 5      Evaluator: gpt-5.6-sol
 Rounds 1-3 closed the task. Rounds 4-6 were a further loop on PR #8 review
